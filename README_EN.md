@@ -4,16 +4,16 @@
 
 <img src="docs/banner.svg" alt="gemini-web2api-go — Gemini web to OpenAI-compatible API, native Gemini API and MCP" width="100%">
 
-[![Release](https://img.shields.io/github/v/release/zexadev/gemini-web2api-go?label=release)](https://github.com/zexadev/gemini-web2api-go/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/zexadev/gemini-web2api-go/total?label=downloads)](https://github.com/zexadev/gemini-web2api-go/releases)
-[![Stars](https://img.shields.io/github/stars/zexadev/gemini-web2api-go?style=flat&label=stars)](https://github.com/zexadev/gemini-web2api-go/stargazers)
+[![Release](https://img.shields.io/github/v/release/ElJoker63/gemini-web2api-go?label=release)](https://github.com/ElJoker63/gemini-web2api-go/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ElJoker63/gemini-web2api-go/total?label=downloads)](https://github.com/ElJoker63/gemini-web2api-go/releases)
+[![Stars](https://img.shields.io/github/stars/ElJoker63/gemini-web2api-go?style=flat&label=stars)](https://github.com/ElJoker63/gemini-web2api-go/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8.svg)](https://golang.org)
 [![Docker](https://img.shields.io/badge/docker-distroless-blue)](Dockerfile)
 
-[中文文档](README.md) | English
+[中文](README.md) | English | [Español](README_ES.md)
 
-> Official repository: **[github.com/zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go)** — releases, issues and docs live here; forks are not maintained by this project.
+> Repository: **[github.com/ElJoker63/gemini-web2api-go](https://github.com/ElJoker63/gemini-web2api-go)** — releases, issues and docs live here.
 
 Turn the Google Gemini web app into an OpenAI-compatible API, with a native Gemini API and MCP tools on the same port. **Single binary**, **no account needed** (anonymous works), **real Chrome 146 fingerprint**, **SQLite / MySQL / PostgreSQL**, ships with an **admin dashboard**.
 
@@ -554,6 +554,7 @@ All flags:
 | `--proxy` | imports this proxy into the proxy pool at startup |
 | `--impersonate` | TLS fingerprint profile |
 | `--version` | print version and exit (this is what the Docker healthcheck runs) |
+| `--update` | check GitHub for newer releases and automatically update the running binary |
 
 ## Cookie (optional)
 

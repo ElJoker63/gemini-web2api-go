@@ -4,16 +4,16 @@
 
 <img src="docs/banner.svg" alt="gemini-web2api-go — Gemini web to OpenAI-compatible API, native Gemini API and MCP" width="100%">
 
-[![Release](https://img.shields.io/github/v/release/zexadev/gemini-web2api-go?label=release)](https://github.com/zexadev/gemini-web2api-go/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/zexadev/gemini-web2api-go/total?label=downloads)](https://github.com/zexadev/gemini-web2api-go/releases)
-[![Stars](https://img.shields.io/github/stars/zexadev/gemini-web2api-go?style=flat&label=stars)](https://github.com/zexadev/gemini-web2api-go/stargazers)
+[![Release](https://img.shields.io/github/v/release/ElJoker63/gemini-web2api-go?label=release)](https://github.com/ElJoker63/gemini-web2api-go/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ElJoker63/gemini-web2api-go/total?label=downloads)](https://github.com/ElJoker63/gemini-web2api-go/releases)
+[![Stars](https://img.shields.io/github/stars/ElJoker63/gemini-web2api-go?style=flat&label=stars)](https://github.com/ElJoker63/gemini-web2api-go/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8.svg)](https://golang.org)
 [![Docker](https://img.shields.io/badge/docker-distroless-blue)](Dockerfile)
 
-中文 | [English](README_EN.md)
+中文 | [English](README_EN.md) | [Español](README_ES.md)
 
-> 官方仓库：**[github.com/zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go)** —— 发版、issue、文档都在这里；各 fork 不由本仓维护。
+> 仓库：**[github.com/ElJoker63/gemini-web2api-go](https://github.com/ElJoker63/gemini-web2api-go)** —— 发版、issue、文档都在这里。
 
 把 Google Gemini 网页端反代成 OpenAI 兼容 API，同一端口还提供 Gemini 原生接口和 MCP 工具。**单二进制**，**零账号**（匿名可跑），**Chrome 146 真指纹**，**SQLite / MySQL / PostgreSQL**，自带**中文管理面板**。
 
@@ -578,6 +578,7 @@ Cookie 池（按 URL、cookie 内容去重），之后一律从面板管理。�
 | `--proxy` | 启动时把这个代理导入代理池 |
 | `--impersonate` | TLS 指纹档位 |
 | `--version` | 打印版本退出（Docker healthcheck 用的就是它） |
+| `--update` | 检查 GitHub 最新版本并自动下载替换当前二进制（自更新） |
 
 ## Cookie（可选）
 

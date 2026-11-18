@@ -2241,7 +2241,7 @@ async function doLogin() {
 // 匿名每小时 60 次，所以成功结果缓存 6 小时；失败不缓存，下次打开面板再试。
 // 不做一键自更新：Docker 部署换容器里的文件重启就没了，Windows 也覆盖不了运行中的 exe，
 // 所以只给出按部署方式的现成命令和下载链接。
-const REPO = 'zexadev/gemini-web2api-go';
+const REPO = 'ElJoker63/gemini-web2api-go';
 const REPO_URL = 'https://github.com/' + REPO;
 const UPD_TTL_MS = 6 * 3600 * 1000;
 let CURRENT_VERSION = '';
@@ -2374,16 +2374,143 @@ function renderUpdate() {
         ${bins.map(a => `<li><a class="link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">${escapeHtml(a.name)}</a></li>`).join('')}
         ${sums ? `<li><a class="link" href="${escapeHtml(sums.url)}" target="_blank" rel="noopener">${escapeHtml(sums.name)}</a> <span class="muted">· <span>校验和</span></span></li>` : ''}
       </ul>
-      <div style="margin-top:14px;">
+      <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+        <button id="btnAutoUpdate" class="btn primary" onclick="triggerAutoUpdate()">一键更新二进制</button>
         <a class="btn" href="${escapeHtml(c.url || REPO_URL + '/releases')}" target="_blank" rel="noopener">在 GitHub 查看</a>
       </div>
+      <div id="updStatusMsg" style="margin-top:10px;"></div>
     </div>`;
+}
+
+async function triggerAutoUpdate() {
+  const btn = document.getElementById('btnAutoUpdate');
+  const msg = document.getElementById('updStatusMsg');
+  if (btn) btn.disabled = true;
+  if (msg) msg.innerHTML = '<span class="muted">正在下载并替换二进制，请稍候…</span>';
+  try {
+    const res = await api('/admin/api/update', { method: 'POST' });
+    if (res && res.status === 'ok') {
+      if (msg) msg.innerHTML = '<span class="badge ok">' + escapeHtml(res.message) + '</span>';
+      flash('更新成功！请重启服务。');
+    } else {
+      throw new Error((res && res.error) || 'Update failed');
+    }
+  } catch (err) {
+    if (msg) msg.innerHTML = '<span class="err">更新失败：' + escapeHtml(err.message || String(err)) + '</span>';
+    flash('更新失败');
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── i18n（中 ⇄ 英）───────────────────────────────────────────────────────
 // 机制：一个 MutationObserver 盯 #app，内容一变就按整段文本节点/属性精确匹配
 // I18N_EN 词典替换成英文；切回中文时从 ZH_ORIG 里恢复原文。渲染逻辑一行不用改，
 // 只在最外面套一层翻译。插值文案（带数字/名字的）不精确匹配、保持中文，属可接受。
+
+const I18N_ES = {
+  '名称 *': 'Nombre *',
+  '代理 URL *': 'URL del Proxy *',
+  '未知错误': 'Error desconocido',
+  '启动参数': 'Argumentos CLI',
+  'cookie 已失效：页面能打开但没有登录态，请求会被当匿名处理': 'Cookie caducada: la página abre sin sesión activa; las peticiones se tratarán como anónimas',
+  'cookie 无效：被重定向到登录页': 'Cookie inválida: redirigido a página de login',
+  '出口被上游限流，换个代理再试（不是 cookie 的问题）': 'Salida limitada por upstream, prueba otro proxy (no es problema de la cookie)',
+  '匿名 /app 没返回 Set-Cookie': '/app anónimo no devolvió Set-Cookie',
+  'impersonate 不能为空': 'impersonate no puede estar vacío',
+  'gemini_bl 不能为空': 'gemini_bl no puede estar vacío',
+  '上游没有返回内容': 'Upstream no devolvió contenido',
+  '轮转页里没有 init(...)（cookie 可能已失效）': 'Página de rotación sin init(...) (la cookie puede haber caducado)',
+  '代理 URL 必须以 http:// / https:// / socks5:// / socks5h:// 开头': 'La URL del proxy debe iniciar con http://, https://, socks5:// o socks5h://',
+  '概览': 'Panel',
+  '请求日志': 'Peticiones',
+  'Cookie 池': 'Pool de Cookies',
+  '代理池': 'Pool de Proxies',
+  'API Keys': 'API Keys',
+  '设置': 'Configuración',
+  '关于': 'Acerca de',
+  '退出': 'Cerrar sesión',
+  '保存': 'Guardar',
+  '取消': 'Cancelar',
+  '编辑': 'Editar',
+  '删除': 'Eliminar',
+  '检测': 'Verificar',
+  '重置': 'Restablecer',
+  '操作': 'Acción',
+  '状态': 'Estado',
+  '全部': 'Todos',
+  '启用': 'Habilitar',
+  '停用': 'Deshabilitar',
+  '成功': 'Éxito',
+  '失败': 'Fallo',
+  '有新版本': 'Nueva versión disponible',
+  '已是最新版本': 'Versión actualizada',
+  '检查更新': 'Buscar actualizaciones',
+  '一键更新二进制': 'Actualizar binario ahora',
+  '正在下载并替换二进制，请稍候…': 'Descargando y reemplazando binario, por favor espere…',
+  '更新成功！请重启服务。': '¡Actualización exitosa! Reinicie el servicio para aplicar.',
+  '更新失败': 'Actualización fallida',
+  '更新失败：': 'Fallo al actualizar: ',
+  '发现新版本': 'Nueva versión detectada',
+  '更新内容': 'Novedades',
+  'Docker 部署': 'Despliegue Docker',
+  '二进制部署': 'Despliegue Binario',
+  '下载对应平台的文件，替换旧的二进制后重启即可；数据在 data/ 目录，不受影响。': 'Descargue el archivo de su plataforma, reemplace el binario y reinicie. Los datos en data/ no se alteran.',
+  '校验和': 'Sumas de verificación',
+  '在 GitHub 查看': 'Ver en GitHub',
+  '复制': 'Copiar',
+  '已复制到剪贴板': 'Copiado al portapapeles',
+  '已保存': 'Guardado correctamente',
+  '保存失败': 'Fallo al guardar',
+  '保存设置': 'Guardar configuración',
+  '多把 Key，各自限制可用账号': 'Múltiples keys con listas de cuentas permitidas',
+  '+ 新增 Key': '+ Nueva Key',
+  '新增 Key': 'Nueva Key',
+  '新增 API Key': 'Nueva API Key',
+  '编辑 API Key #': 'Editar API Key #',
+  '删除 API Key': 'Eliminar API Key',
+  '轮换 API Key': 'Rotar API Key',
+  '轮换': 'Rotar',
+  '创建': 'Crear',
+  '创建时间': 'Creado',
+  '允许账号': 'Cuentas permitidas',
+  '默认 Key': 'Key por defecto',
+  '部署 Key': 'Key de despliegue',
+  '全部账号': 'Todas las cuentas',
+  '仅匿名': 'Solo anónimo',
+  '出口': 'Salida',
+  '可用性': 'Disponibilidad',
+  '自动': 'Automático',
+  '可用': 'Disponible',
+  '独占此 IP': 'Exclusivo para esta IP',
+  '专属账号': 'Exclusivo de',
+  '共享': 'Compartido',
+  'IP 冷却中': 'IP en enfriamiento',
+  'IP 不可用': 'IP no disponible',
+  '近 24 小时请求': 'Peticiones últimas 24h',
+  '成功率': 'Tasa de éxito',
+  '平均耗时': 'Latencia media',
+  '活跃 Cookie': 'Cookies activas',
+  '健康代理': 'Proxies saludables',
+  '模型调用分布': 'Distribución de modelos',
+  '错误分类': 'Clasificación de errores',
+  '时间': 'Hora',
+  '模型': 'Modelo',
+  '耗时': 'Duración',
+  '客户端 IP': 'IP Cliente',
+  '版本': 'Versión',
+  '版本与更新': 'Versión y actualizaciones',
+  '项目': 'Proyecto',
+  'GitHub 仓库': 'Repositorio GitHub',
+  '去 GitHub 点 Star': 'Dar Star en GitHub',
+  '仓库': 'Repositorio',
+  '链接': 'Enlaces',
+  '更新日志': 'Registro de cambios',
+  '发布页': 'Lanzamientos',
+  '提交问题': 'Reportar issue',
+  '许可证': 'Licencia',
+  '作者': 'Autor'
+};
+
 const I18N_EN = {
   '名称 *': 'Name *',
   '代理 URL *': 'Proxy URL *',
@@ -2977,14 +3104,16 @@ const I18N_PATTERNS = [
   [/^确定删除代理 #(\d+)？此操作不可撤销。被 Cookie 独占绑定的代理需要先解绑。$/, 'Delete proxy #$1? This cannot be undone. A proxy bound exclusively to a cookie must be unbound first.'],
 ];
 
-let LANG = (() => { try { return localStorage.getItem('lang') === 'en' ? 'en' : 'zh'; } catch (e) { return 'zh'; } })();
+let LANG = (() => { try { const l = localStorage.getItem('lang'); return (l === 'es' || l === 'en') ? l : 'zh'; } catch (e) { return 'zh'; } })();
 const ZH_ORIG = new WeakMap();
 const I18N_ATTRS = ['title', 'placeholder', 'aria-label'];
 
 function t(s) {
-  if (LANG !== 'en' || !s) return s;
+  if (LANG === 'zh' || !s) return s;
   const k = s.trim().replace(/\s+/g, ' ');
-  if (I18N_EN[k]) return I18N_EN[k];
+  const dict = LANG === 'es' ? I18N_ES : I18N_EN;
+  if (dict[k]) return dict[k];
+  if (LANG === 'es' && I18N_EN[k]) return I18N_EN[k];
 
   // Toast / status prefix pattern (e.g. "✓ #1 登录态有效，出口 启动参数，2109ms")
   const toastMatch = k.match(/^([✓✗]\s*#\d+\s+)(.*)$/);
@@ -3015,7 +3144,9 @@ function t(s) {
   return matched ? cur : s;
 }
 
-function translateTree(root, toEN) {
+function translateTree(root, lang) {
+  const toEN = lang === 'en' || lang === 'es';
+  const dict = lang === 'es' ? I18N_ES : I18N_EN;
   const norm = s => s.trim().replace(/\s+/g, ' ');
 
   // 1. Rich HTML blocks (paragraphs with <b>, <code>, <br>)
@@ -3046,7 +3177,7 @@ function translateTree(root, toEN) {
     const key = norm(raw);
     if (!key) continue;
     if (toEN) {
-      let en = I18N_EN[key];
+      let en = dict[key] || (lang === "es" ? I18N_EN[key] : null);
       if (!en) {
         let cur = key;
         let matched = false;
@@ -3078,7 +3209,7 @@ function translateTree(root, toEN) {
       const dz = 'data-zh-' + attr;
       if (toEN) {
         const val = norm(el.getAttribute(attr));
-        let en = I18N_EN[val];
+        let en = dict[val] || (lang === "es" ? I18N_EN[val] : null);
         if (!en) {
           let cur = val;
           let matched = false;
@@ -3108,8 +3239,8 @@ function i18nApply() {
   const app = document.getElementById('app');
   if (!app) return;
   if (i18nObserver) i18nObserver.disconnect();
-  translateTree(app, LANG === 'en');
-  document.querySelectorAll('.modal-overlay, .toast').forEach(el => translateTree(el, LANG === 'en'));
+  translateTree(app, LANG);
+  document.querySelectorAll('.modal-overlay, .toast').forEach(el => translateTree(el, LANG));
   if (i18nObserver) i18nObserver.observe(app, { childList: true, subtree: true, characterData: true });
 }
 function i18nSchedule() {
@@ -3127,12 +3258,12 @@ function i18nInit() {
 }
 function updateLangBtn() {
   const b = document.getElementById('langBtn');
-  if (b) b.textContent = LANG === 'en' ? '中' : 'EN';
-  document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
-  document.title = LANG === 'en' ? 'gemini-web2api Admin Panel' : 'gemini-web2api 管理面板';
+  if (b) b.textContent = LANG === 'es' ? 'ES' : (LANG === 'en' ? 'EN' : '中');
+  document.documentElement.lang = LANG === 'es' ? 'es' : (LANG === 'en' ? 'en' : 'zh-CN');
+  document.title = LANG === 'es' ? 'gemini-web2api Panel de Administración' : (LANG === 'en' ? 'gemini-web2api Admin Panel' : 'gemini-web2api 管理面板');
 }
 function toggleLang() {
-  LANG = LANG === 'en' ? 'zh' : 'en';
+  LANG = LANG === 'zh' ? 'en' : (LANG === 'en' ? 'es' : 'zh');
   try { localStorage.setItem('lang', LANG); } catch (e) {}
   i18nApply();
   updateLangBtn();

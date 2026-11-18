@@ -40,10 +40,18 @@ func Run() {
 	adminToken := flag.String("admin-token", "", "admin token (empty = no auth, only safe on 127.0.0.1)")
 	apiKey := flag.String("api-key", "", "API key for /v1/* (locked). Empty = use kv-table key (auto-gen on first boot, mutable from admin UI)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	doUpdate := flag.Bool("update", false, "check for updates and self-update binary")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("gemini-web2api-go %s\n", Version)
+		return
+	}
+	if *doUpdate {
+		if err := PerformSelfUpdate(); err != nil {
+			fmt.Fprintf(os.Stderr, "Update error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -154,6 +162,7 @@ func Run() {
 		mux.HandleFunc("/admin/api/cookies/", requireAuth(handleAdminCookieItem))
 		mux.HandleFunc("/admin/api/test", requireAuth(handleAdminTest))
 		mux.HandleFunc("/admin/api/video-quota", requireAuth(handleAdminVideoQuota))
+		mux.HandleFunc("/admin/api/update", requireAuth(handleAdminUpdate))
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

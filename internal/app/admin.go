@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -788,3 +790,46 @@ func errorBreakdown(since int64) []map[string]interface{} {
 	})
 	return out
 }
+
+// handleAdminUpdate — GET check update status / POST execute self-update
+func handleAdminUpdate(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		res, err := CheckForUpdate()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	case http.MethodPost:
+		res, err := CheckForUpdate()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]interface{}{
+				"error": fmt.Sprintf("update check failed: %v", err),
+			})
+			return
+		}
+		if res.DownloadURL == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error": fmt.Sprintf("no binary asset found for %s/%s", runtime.GOOS, runtime.GOARCH),
+			})
+			return
+		}
+		if err := ApplyUpdate(res.DownloadURL); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"error": fmt.Sprintf("failed to apply update: %v", err),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "ok",
+			"version": res.LatestVersion,
+			"message": fmt.Sprintf("Successfully updated to v%s. Please restart the service.", res.LatestVersion),
+		})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
