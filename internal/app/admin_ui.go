@@ -46,9 +46,13 @@ func handleAdminUI(w http.ResponseWriter, r *http.Request) {
 	case len(path) > 5 && path[len(path)-5:] == ".html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	case len(path) > 3 && path[len(path)-3:] == ".js":
-		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	case len(path) > 4 && path[len(path)-4:] == ".css":
-		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case len(path) > 5 && path[len(path)-5:] == ".json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	case len(path) > 4 && path[len(path)-4:] == ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
 	default:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}

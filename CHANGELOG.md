@@ -2,6 +2,18 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.30.2
+
+### 新增 / Features
+
+- **UI 结构与 i18n 彻底解耦 / UI Modularization & JSON i18n**：
+  - HTML、CSS 与 JavaScript 彻底解耦，分离为独立的 `css/style.css`、`js/icons.js` 与 `js/app.js`。
+  - 多语言国际化系统全面迁移至标准化 JSON 字典（`locales/zh.json`, `locales/en.json`, `locales/es.json`），补全了西班牙语（410+ 词条）缺失内容并修复了动态切换与响应式监听。
+- **深色模式 / Dark Mode**：
+  - 管理面板新增完整深色模式主题，智能适配系统偏好，支持顶栏一键切换并持久化记忆。
+- **Hugeicons 图标库 / Hugeicons**：
+  - 侧边栏、顶栏及所有操作按钮图标全面升级为 Hugeicons 现代化轻量描边图标。
+
 ## 4.30.1
 
 ### 新增 / Features
