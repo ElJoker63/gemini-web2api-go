@@ -1004,7 +1004,7 @@ func xsrfErrBlamesCookie(err error) bool {
 	case se.Status == 401 || se.Status == 403:
 		return true
 	case se.Status >= 300 && se.Status < 400:
-		return strings.HasPrefix(se.Location, "accounts.google.com")
+		return strings.HasPrefix(se.Location, "accounts.google.com") || strings.Contains(se.Location, "gemini.google.com/app")
 	}
 	return false
 }

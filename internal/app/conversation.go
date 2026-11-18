@@ -221,12 +221,40 @@ func convPut(key string, st *convState) {
 func canonicalMessages(messages []map[string]interface{}) string {
 	var b strings.Builder
 	for _, m := range messages {
-		b.WriteString(getStr(m, "role"))
+		role := getStr(m, "role")
+		b.WriteString(role)
 		b.WriteByte(0x1f)
-		b.WriteString(contentToString(m["content"]))
+		b.WriteString(strings.TrimSpace(contentToString(m["content"])))
+		if role == "assistant" {
+			if tcs, ok := m["tool_calls"].([]interface{}); ok && len(tcs) > 0 {
+				for _, tc := range tcs {
+					if tcm, ok := tc.(map[string]interface{}); ok {
+						if fn, ok := tcm["function"].(map[string]interface{}); ok {
+							b.WriteString("\x1fcall:" + getStr(fn, "name") + ":" + getStr(fn, "arguments"))
+						}
+					}
+				}
+			}
+		} else if role == "tool" {
+			b.WriteString("\x1fname:" + getStr(m, "name"))
+		}
 		b.WriteByte(0x1e)
 	}
 	return b.String()
+}
+
+// canonicalChatMessages 过滤掉 system 消息，避免动态时间戳或动态记忆注入导致会话指纹变化。
+func canonicalChatMessages(messages []map[string]interface{}) string {
+	var chatOnly []map[string]interface{}
+	for _, m := range messages {
+		if getStr(m, "role") != "system" {
+			chatOnly = append(chatOnly, m)
+		}
+	}
+	if len(chatOnly) == 0 {
+		return ""
+	}
+	return canonicalMessages(chatOnly)
 }
 
 func hashStr(s string) string {
@@ -250,6 +278,89 @@ func convChildKey(messages []map[string]interface{}, responseText string, keyID 
 	full := append(append([]map[string]interface{}{}, messages...),
 		map[string]interface{}{"role": "assistant", "content": responseText})
 	return hashStr(fmt.Sprintf("%d\x1f%s", keyID, canonicalMessages(full)))
+}
+
+// convLastTurnKey 针对最近一轮问答生成指纹：允许历史即便被滑动窗口截断也能保持会话续接。
+func convLastTurnKey(messages []map[string]interface{}, responseText string, keyID int64) string {
+	var lastUser string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if getStr(messages[i], "role") == "user" {
+			lastUser = strings.TrimSpace(contentToString(messages[i]["content"]))
+			break
+		}
+	}
+	if lastUser == "" && responseText == "" {
+		return ""
+	}
+	return hashStr(fmt.Sprintf("%d\x1fturn\x1f%s\x1f%s", keyID, lastUser, strings.TrimSpace(responseText)))
+}
+
+func convParentTurnKey(messages []map[string]interface{}, keyID int64) string {
+	if len(messages) < 2 {
+		return ""
+	}
+	hist := messages[:len(messages)-1]
+	var lastAssistant string
+	var asstIdx = -1
+	for i := len(hist) - 1; i >= 0; i-- {
+		if getStr(hist[i], "role") == "assistant" {
+			lastAssistant = strings.TrimSpace(contentToString(hist[i]["content"]))
+			asstIdx = i
+			break
+		}
+	}
+	if asstIdx == -1 {
+		return ""
+	}
+	var prevUser string
+	for i := asstIdx - 1; i >= 0; i-- {
+		if getStr(hist[i], "role") == "user" {
+			prevUser = strings.TrimSpace(contentToString(hist[i]["content"]))
+			break
+		}
+	}
+	if prevUser == "" && lastAssistant == "" {
+		return ""
+	}
+	return hashStr(fmt.Sprintf("%d\x1fturn\x1f%s\x1f%s", keyID, prevUser, lastAssistant))
+}
+
+// convFind 综合多个索引尝试找到已存在的会话状态：
+// 1. 显式 convID (如客户端传递的 conversation_id / session_id)
+// 2. 全量消息指纹 (convParentKey)
+// 3. 去掉 system 消息的纯聊天指纹 (convParentChatKey)
+// 4. 最近一轮问答指纹 (convParentTurnKey)
+func convFind(messages []map[string]interface{}, keyID int64, explicitConvID string) (*convState, string) {
+	if explicitConvID != "" {
+		idKey := "id:" + explicitConvID
+		if st := convGet(idKey); st != nil {
+			return st, idKey
+		}
+		cidKey := "cid:" + explicitConvID
+		if st := convGet(cidKey); st != nil {
+			return st, cidKey
+		}
+	}
+	if len(messages) < 2 {
+		return nil, ""
+	}
+	parentKey := convParentKey(messages, keyID)
+	if st := convGet(parentKey); st != nil {
+		return st, parentKey
+	}
+	if chatStr := canonicalChatMessages(messages[:len(messages)-1]); chatStr != "" {
+		chatKey := hashStr(fmt.Sprintf("%d\x1fchat\x1f%s", keyID, chatStr))
+		if st := convGet(chatKey); st != nil {
+			return st, chatKey
+		}
+	}
+	turnKey := convParentTurnKey(messages, keyID)
+	if turnKey != "" {
+		if st := convGet(turnKey); st != nil {
+			return st, turnKey
+		}
+	}
+	return nil, parentKey
 }
 
 var rcidRe = regexp.MustCompile(`"(rc_[A-Za-z0-9_-]{6,})"`)
@@ -298,6 +409,9 @@ func parseConvIDs(raw string) (cid, rid, rcid, tok26 string) {
 	}
 	if m := rcidRe.FindStringSubmatch(raw); m != nil {
 		rcid = m[1]
+	}
+	if cid == "" {
+		cid = extractConversationID(raw)
 	}
 	return
 }
@@ -373,6 +487,10 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		if a == nil || a.Status != "enabled" {
 			return &StreamResult{AccountID: conv.accountID}, fmt.Errorf(
 				"conversation account #%d is no longer available", conv.accountID)
+		}
+		if a.Cookie != "" && a.Cookie != conv.cookie {
+			conv.cookie = a.Cookie
+			conv.sapisid = extractSAPISID(a.Cookie)
 		}
 		if a.ProxyExclusive {
 			if a.ProxyID <= 0 {
@@ -459,6 +577,26 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 	inner[96] = 0
 	if tw != thinkingNormal {
 		inner[96] = 1
+	}
+	if mc.Mode == 8 {
+		inner[6] = []interface{}{1}
+		inner[30] = []interface{}{}
+		inner[49] = 40
+		inner[68] = 2
+		inner[83] = 1
+		inner[91] = 1
+		inner[96] = 1
+		inner[98] = 1
+	}
+	if mc.Tool > 0 {
+		inner[49] = mc.Tool
+	}
+	if mc.Tool == toolVideo {
+		aspect := 16
+		if mc.VideoAspect == 17 {
+			aspect = 17
+		}
+		inner[55] = []interface{}{[]interface{}{aspect}}
 	}
 
 	innerJSON, _ := json.Marshal(inner)
@@ -575,6 +713,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		}
 		// 成功：回填续接状态。
 		cid, rid, rcid, tok26 := parseConvIDs(string(raw))
+		if cid == "" {
+			cid = extractConversationID(string(raw))
+		}
 		if cid != "" {
 			conv.cid = cid
 		}
@@ -584,7 +725,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		if rcid != "" {
 			conv.rcid = rcid
 		}
-		conv.tok26 = tok26 // 每轮更新（可能为空）
+		if tok26 != "" {
+			conv.tok26 = tok26
+		}
 		conv.turn++
 		if pickedOK {
 			recordProxyResult(p.ID, true, "")
@@ -598,6 +741,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 			ProxyID:          p.ID,
 			ProxyName:        p.Name,
 			AccountID:        conv.accountID,
+			ConvCID:          conv.cid,
+			ConvRID:          conv.rid,
+			ConvRCID:         conv.rcid,
 			TTFBMs:           ttfb,
 			TotalMs:          time.Since(t0).Milliseconds(),
 		}, nil
@@ -612,13 +758,18 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 // 支持 tools（续接里也解析 ```tool_call``` 围栏）；图片走原单轮路径（callGemini）。
 func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 	tools []map[string]interface{}, toolChoice interface{},
-	onDelta, onReasoning func(string)) (string, []ToolCall, *StreamResult, error) {
-	parentKey := convParentKey(messages, mc.KeyID)
-	conv := convGet(parentKey)
+	onDelta, onReasoning func(string), explicitConvID ...string) (string, []ToolCall, *StreamResult, error) {
+	convID := ""
+	if len(explicitConvID) > 0 {
+		convID = explicitConvID[0]
+	}
+	conv, matchedKey := convFind(messages, mc.KeyID, convID)
 	// Key 的账号白名单可能在会话存续期间被改过：续接前重新确认这个号仍被允许。
 	// 不允许就作废会话，当新会话全量重发，避免绕过 Key 限制。
 	if conv != nil && conv.isLogin && !allowedByMap(mc.AllowedAccounts, conv.accountID) {
-		convDelete(parentKey)
+		if matchedKey != "" {
+			convDelete(matchedKey)
+		}
 		conv = nil
 	}
 	fresh := conv == nil
@@ -677,10 +828,51 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 			break
 		}
 	}
+
+	// 续接失败自愈：如果续接发生错误（如上游会话过期、无内容帧等），且流式尚未向客户端吐出数据，
+	// 平滑降级为全量重发（建新会话），避免直接给客户端报错 502。
+	if err != nil && !fresh && (res == nil || (res.Emitted == "" && res.EmittedReasoning == "")) {
+		logf("[conv] 续接失败 (%v)，平滑降级为全量首轮重发...", err)
+		if matchedKey != "" {
+			convDelete(matchedKey)
+		}
+		fresh = true
+		prompt, _ = messagesToPrompt(messages, tools, toolChoice)
+		logf("[conv] 降级新会话，首轮发 %d 字节（tools=%d）", len(prompt), len(tools))
+		for try := 0; try < maxCookieTries; try++ {
+			conv = &convState{keyID: mc.KeyID}
+			if !anonFirstEligible(mc, false) {
+				a, _, perr := pickAccountForModel(mc, exclude)
+				if perr != nil {
+					var last *ModelDowngradedError
+					if try > 0 && errors.As(err, &last) {
+						var next *ModelDowngradedError
+						if errors.As(perr, &next) {
+							last.RetryAfter = next.RetryAfter
+						}
+						break
+					}
+					return "", nil, &StreamResult{}, perr
+				}
+				if a != nil {
+					conv.cookie = a.Cookie
+					conv.sapisid = extractSAPISID(a.Cookie)
+					conv.isLogin = true
+					conv.accountID = a.ID
+					conv.authuser = a.AuthUser
+					conv.proxyID = a.ProxyID
+				}
+			}
+			res, err = streamGenerateConv(prompt, mc, conv, onDelta, onReasoning)
+			if !retryOnAnotherAccount(res, err, mc, exclude) {
+				break
+			}
+		}
+	}
+
 	if err != nil {
-		if !fresh {
-			// 续接失败：这路会话作废，客户端重试时会当新会话全量重发。
-			convDelete(parentKey)
+		if matchedKey != "" {
+			convDelete(matchedKey)
 		}
 		return "", nil, res, err
 	}
@@ -690,14 +882,33 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 		text, toolCalls = parseToolCalls(text)
 	}
 	if text == "" && len(toolCalls) == 0 {
-		if !fresh {
-			convDelete(parentKey)
+		if matchedKey != "" {
+			convDelete(matchedKey)
 		}
 		return "", nil, res, fmt.Errorf("upstream returned no content frame (raw %d bytes)", len(res.Raw))
 	}
-	// 存续接状态：客户端下一轮把这段回复原样带回来时，parentKey 会命中这里。
-	// 存的是解析掉围栏后的正文 —— 客户端把 assistant 消息带回来时 content 也是这段。
-	convPut(convChildKey(messages, text, mc.KeyID), conv)
+
+	// 存续接状态：多种索引键全部存入，方便后续各轮命中。
+	childKey := convChildKey(messages, text, mc.KeyID)
+	convPut(childKey, conv)
+
+	full := append(append([]map[string]interface{}{}, messages...),
+		map[string]interface{}{"role": "assistant", "content": text})
+	if chatStr := canonicalChatMessages(full); chatStr != "" {
+		chatKey := hashStr(fmt.Sprintf("%d\x1fchat\x1f%s", mc.KeyID, chatStr))
+		if chatKey != childKey {
+			convPut(chatKey, conv)
+		}
+	}
+	if turnKey := convLastTurnKey(messages, text, mc.KeyID); turnKey != "" {
+		convPut(turnKey, conv)
+	}
+	if convID != "" {
+		convPut("id:"+convID, conv)
+	}
+	if conv.cid != "" {
+		convPut("cid:"+conv.cid, conv)
+	}
 	return text, toolCalls, res, nil
 }
 
