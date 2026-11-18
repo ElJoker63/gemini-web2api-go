@@ -2,6 +2,11 @@
 // 它不是一条硬线：能打多少主要看连接复用和出口质量，而平缓节奏几乎打不满。
 const BAN_LINE = 80;
 
+const NOTE_BAN_LINE = '实测单个出口打 <b>80-180 次</b>后会被 Google 重定向到 <code>sorry/index</code>， 轨道取的是这个区间的<b>下沿</b>。区间这么宽是因为它主要由连接策略和出口质量 决定：同样并发 10，复用连接池能打到 172/177，每次新建连接只有 106/109； 静态 IP 上到过 188。<br><br> <b>它不是一条硬线。</b>节奏才是关键 —— 10 次/分钟平缓地打，连打 800 次、 跨 110 分钟一次没被拦。所以这条轨道是保守参考，不是"到了就会挂"。<br><br> 被拦之后是硬拦（封后 20 分钟内 60 次探测 0 成功），106-121 分钟自动恢复。 红竖线是本地 RPH 限额的位置，超了直接返回 429 而不去消耗 Google 配额。 要放大产能就在「代理池」加代理，每个代理是独立 slot。';
+const NOTE_PROXY = '每个代理享有独立的并发 / RPM / RPH 配额，<b>配越多代理，总容量线性放大</b>。 请求会自动找有空位的代理，都满则返回 HTTP 429。失败 5 次自动熔断， 「重置」可手动恢复。<br><br> 注意：配了至少一个代理后<b>默认不会再退回直连</b>，避免代理满了把主机 IP 也打爆； 要可用性优先可以在「设置」页打开「无可用代理时退回直连」。熔断的代理默认歇 120 分钟自动放回池子（实测被拦的出口 106-121 分钟自恢复），也可以在这里手动重置。 实测单个出口打 80-180 次就会被 Google 拦，所以扩容只能靠加出口。';
+const NOTE_COOKIE = '粘贴 gemini.google.com 下的<b>完整 cookie 串</b>（至少含 SID / HSID / SSID / APISID / SAPISID / __Secure-1PSID / __Secure-1PSIDTS）。请求时按<b>最久未用优先</b>自动轮转挑一个 启用的账号，媒体生成有每账号 10/天 的配额，配越多号总容量越大。<br><br> 凭证保存后<b>不再回传浏览器</b>，列表只显示脱敏摘要（cookie 数 / 关键项 / SAPISID 末 4 位 / 失败次数）。缺 <code>__Secure-1PSIDTS</code> 的号会标黄， 首次保活会尝试向 Google 补发；若反复失败请用 <b>Firefox</b> 重新导出 （Chrome 新版本的设备绑定会话续不了）。';
+const NOTE_KEY = '每个 Key 默认允许全部账号；关闭「允许全部账号」后只使用勾选的 Cookie 账号，一个都不勾时只能走匿名能力（登录态模型会从该 Key 的模型列表隐藏，请求返回 403）。<br><br><code>--api-key</code> / <code>API_KEY</code> 提供的是<b>部署 Key</b>：永远启用、允许全部账号、面板只读，不能改值或删除；它和这里新增的 Key 同时有效。列表只显示脱敏值，需要完整 Key 时点「显示」。';
+
 const api = async (path, opts = {}) => {
   const r = await fetch(path, { credentials: 'include', ...opts,
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } });
@@ -10,7 +15,7 @@ const api = async (path, opts = {}) => {
 };
 
 const fmt = {
-  ts: (sec) => new Date(sec * 1000).toLocaleString('zh-CN', { hour12: false }),
+  ts: (sec) => new Date(sec * 1000).toLocaleString(LANG === 'es' ? 'es-ES' : (LANG === 'en' ? 'en-US' : 'zh-CN'), { hour12: false }),
   ms: (ms) => ms == null ? '-' : (ms < 1000 ? ms + 'ms' : (ms/1000).toFixed(2) + 's'),
   num: (n) => (n || 0).toLocaleString(),
   pct: (n) => (n * 100).toFixed(1) + '%',
@@ -27,22 +32,22 @@ const pages = {
     const usage = await api('api/usage');
     return `
       <div class="kpi-row">
-        <div class="kpi"><div class="label">24 小时请求</div><div class="value">${fmt.num(stats.total_requests)}</div></div>
-        <div class="kpi"><div class="label">成功率</div><div class="value">${fmt.pct(stats.success_rate)}</div>
+        <div class="kpi"><div class="label">${t('24 小时请求')}</div><div class="value">${fmt.num(stats.total_requests)}</div></div>
+        <div class="kpi"><div class="label">${t('成功率')}</div><div class="value">${fmt.pct(stats.success_rate)}</div>
           <div class="sub">${fmt.num(stats.success)} ${t('成功')} · ${fmt.num(stats.failures)} ${t('失败')}</div></div>
-        <div class="kpi"><div class="label">平均延迟</div><div class="value">${fmt.ms(stats.avg_ms)}</div></div>
-        <div class="kpi"><div class="label">输入 Token</div><div class="value">${fmt.num(stats.prompt_tokens)}</div></div>
-        <div class="kpi"><div class="label">输出 Token</div><div class="value">${fmt.num(stats.output_tokens)}</div></div>
+        <div class="kpi"><div class="label">${t('平均延迟')}</div><div class="value">${fmt.ms(stats.avg_ms)}</div></div>
+        <div class="kpi"><div class="label">${t('输入 Token')}</div><div class="value">${fmt.num(stats.prompt_tokens)}</div></div>
+        <div class="kpi"><div class="label">${t('输出 Token')}</div><div class="value">${fmt.num(stats.output_tokens)}</div></div>
       </div>
 
       <div class="grid-main">
         <div class="panel">
-          <h2>请求量与延迟
+          <h2>${t('请求量与延迟')}
             <span class="controls">
               <select id="rangeSel">
-                <option value="24h">最近 24 小时</option>
-                <option value="7d">最近 7 天</option>
-                <option value="30d">最近 30 天</option>
+                <option value="24h">${t('最近 24 小时')}</option>
+                <option value="7d">${t('最近 7 天')}</option>
+                <option value="30d">${t('最近 30 天')}</option>
               </select>
             </span>
           </h2>
@@ -51,8 +56,8 @@ const pages = {
 
         <div class="stack">
         <div class="panel">
-          <h2>距离封禁红线
-            <span class="controls"><button onclick="refreshPage()">刷新</button></span>
+          <h2>${t('距离封禁红线')}
+            <span class="controls"><button onclick="refreshPage()">${t('刷新')}</button></span>
           </h2>
           <div class="slot-scroll">
             ${(usage.items || []).map(u => {
@@ -75,38 +80,27 @@ const pages = {
                   ${limitPct !== null ? `<div class="redline" style="left:${limitPct}%"
                     title="${LANG === 'es' ? 'Límite local RPH ' + limit : (LANG === 'en' ? 'Local RPH limit ' + limit : '本地 RPH 限额 ' + limit)}"></div>` : ''}
                 </div>
-                <div class="slot-note ${noteCls}">${note} · ${(LANG === 'es' ? 'Concurrencia ' : (LANG === 'en' ? 'Inflight ' : '并发 '))}${u.inflight}/${u.limit_concurrent || '∞'}
+                <div class="slot-note ${noteCls}">${note} · ${t('并发')} ${u.inflight}/${u.limit_concurrent || '∞'}
                   · RPM ${u.rpm}/${u.limit_rpm || '∞'} · RPH ${rph}/${u.limit_rph || '∞'}</div>
               </div>`;
-            }).join('') || '<div class="empty">还没有任何请求经过</div>'}
+            }).join('') || '<div class="empty">' + t('还没有任何请求经过') + '</div>'}
           </div>
           <details class="note" style="margin:12px 0 0">
-            <summary>这条线是怎么来的</summary>
-            <div class="body">
-              实测单个出口打 <b>80-180 次</b>后会被 Google 重定向到 <code>sorry/index</code>，
-              轨道取的是这个区间的<b>下沿</b>。区间这么宽是因为它主要由连接策略和出口质量
-              决定：同样并发 10，复用连接池能打到 172/177，每次新建连接只有 106/109；
-              静态 IP 上到过 188。<br><br>
-              <b>它不是一条硬线。</b>节奏才是关键 —— 10 次/分钟平缓地打，连打 800 次、
-              跨 110 分钟一次没被拦。所以这条轨道是保守参考，不是"到了就会挂"。<br><br>
-              被拦之后是硬拦（封后 20 分钟内 60 次探测 0 成功），106-121 分钟自动恢复。
-              红竖线是本地 RPH 限额的位置，超了直接返回 429 而不去消耗 Google 配额。
-              要放大产能就在「代理池」加代理，每个代理是独立 slot。
-            </div>
+            <summary>${t('这条线是怎么来的')}</summary>
+            <div class="body">${t(NOTE_BAN_LINE)}</div>
           </details>
         </div>
 
         <div class="panel">
-          <h2>连通性诊断
-            <span class="controls"><button class="btn" onclick="runTest()">测试一次</button></span>
+          <h2>${t('连通性诊断')}
+            <span class="controls"><button class="btn" onclick="runTest()">${t('测试一次')}</button></span>
           </h2>
           <select id="testProxy" style="width:100%">
-            <option value="">自动选择（按调度规则）</option>
-            <option value="0">直连主机 IP</option>
+            <option value="">${t('自动选择（按调度规则）')}</option>
+            <option value="0">${t('直连主机 IP')}</option>
           </select>
           <p class="hint" style="margin-top:10px">
-            打一次真实请求看是否通。不消耗限流配额、不写入请求记录。
-            返回 302/429 就是出口进了黑名单，该换 IP。
+            ${t('打一次真实请求看是否通。不消耗限流配额、不写入请求记录。返回 302/429 就是出口进了黑名单，该换 IP。')}
           </p>
           <div id="testResult" style="display:none; margin-top:12px;"></div>
         </div>
@@ -115,48 +109,48 @@ const pages = {
 
       <div class="grid-2">
         <div class="panel">
-          <h2>按模型分组</h2>
+          <h2>${t('按模型分组')}</h2>
           <table>
             <colgroup><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:16%"><col style="width:18%"></colgroup>
-            <thead><tr><th>模型</th><th class="nw">请求</th><th class="nw">成功</th><th class="nw">平均</th><th class="nw">Token</th></tr></thead>
+            <thead><tr><th>${t('模型')}</th><th class="nw">${t('请求')}</th><th class="nw">${t('成功')}</th><th class="nw">${t('平均')}</th><th class="nw">${t('Token')}</th></tr></thead>
             <tbody>${(stats.by_model || []).map(m => `
               <tr><td class="truncate" title="${escapeHtml(m.model)}">${m.model}</td>
                   <td class="num nw">${fmt.num(m.requests)}</td>
                   <td class="num nw">${fmt.num(m.success)}</td>
                   <td class="num nw">${fmt.ms(m.avg_ms)}</td>
                   <td class="num nw">${fmt.num(m.prompt_tokens + m.output_tokens)}</td></tr>`).join('')
-              || '<tr><td colspan="5" class="empty">暂无数据</td></tr>'}
+              || '<tr><td colspan="5" class="empty">' + t('暂无数据') + '</td></tr>'}
             </tbody>
           </table>
         </div>
         <div class="panel">
-          <h2>按出口分组</h2>
+          <h2>${t('按出口分组')}</h2>
           <table>
             <colgroup><col style="width:46%"><col style="width:18%"><col style="width:18%"><col style="width:18%"></colgroup>
-            <thead><tr><th>出口</th><th class="nw">请求</th><th class="nw">成功</th><th class="nw">平均</th></tr></thead>
+            <thead><tr><th>${t('出口')}</th><th class="nw">${t('请求')}</th><th class="nw">${t('成功')}</th><th class="nw">${t('平均')}</th></tr></thead>
             <tbody>${(stats.by_proxy || []).map(p => `
-              <tr><td class="truncate">${!p.proxy || p.proxy === '(direct)' ? '直连' : escapeHtml(p.proxy)}</td>
+              <tr><td class="truncate">${!p.proxy || p.proxy === '(direct)' ? t('直连') : escapeHtml(p.proxy)}</td>
                   <td class="num nw">${fmt.num(p.requests)}</td>
                   <td class="num nw">${fmt.num(p.success)}</td>
                   <td class="num nw">${fmt.ms(p.avg_ms)}</td></tr>`).join('')
-              || '<tr><td colspan="4" class="empty">暂无数据</td></tr>'}
+              || '<tr><td colspan="4" class="empty">' + t('暂无数据') + '</td></tr>'}
             </tbody>
           </table>
         </div>
       </div>
 
       <div class="panel">
-          <h2>错误分类（近 ${stats.window_hours || 24}h）</h2>
+          <h2>${t('错误分类')}（${t('近')} ${stats.window_hours || 24}h）</h2>
           <table>
             <colgroup><col style="width:22%"><col style="width:10%"><col style="width:68%"></colgroup>
-            <thead><tr><th>类型</th><th class="nw">次数</th><th>含义 / 该怎么办</th></tr></thead>
+            <thead><tr><th>${t('类型')}</th><th class="nw">${t('次数')}</th><th>${t('含义 / 该怎么办')}</th></tr></thead>
             <tbody>
               ${(stats.error_breakdown || []).map(e => `<tr>
                 <td class="nw"><span class="badge ${ERR_BADGE[e.kind] || 'muted'}">${escapeHtml(e.kind)}</span></td>
                 <td class="num nw">${e.count}</td>
                 <td style="font-size:12.5px">${t(ERR_DESC[e.kind] || '')}
                   <div class="pre" style="margin-top:5px;color:var(--muted)">${escapeHtml(t(e.sample || ''))}</div></td>
-              </tr>`).join('') || '<tr><td colspan="3" class="empty">窗口内没有失败</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="3" class="empty">' + t('窗口内没有失败') + '</td></tr>'}
             </tbody>
           </table>
       </div>
@@ -166,21 +160,21 @@ const pages = {
   requests: async () => {
     return `
       <div class="panel page-fill">
-        <h2>请求记录
+        <h2>${t('请求记录')}
           <span class="controls">
             <select id="reqStatus">
-              <option value="">全部</option>
-              <option value="ok">成功</option>
-              <option value="fail">失败</option>
+              <option value="">${t('全部')}</option>
+              <option value="ok">${t('成功')}</option>
+              <option value="fail">${t('失败')}</option>
             </select>
-            <select id="reqModel"><option value="">全部模型</option></select>
+            <select id="reqModel"><option value="">${t('全部模型')}</option></select>
             <select id="reqSize">
-              <option value="25">每页 25</option>
-              <option value="50" selected>每页 50</option>
-              <option value="100">每页 100</option>
-              <option value="200">每页 200</option>
+              <option value="25">${t('每页 25')}</option>
+              <option value="50" selected>${t('每页 50')}</option>
+              <option value="100">${t('每页 100')}</option>
+              <option value="200">${t('每页 200')}</option>
             </select>
-            <button onclick="loadReqs()">刷新</button>
+            <button onclick="loadReqs()">${t('刷新')}</button>
           </span>
         </h2>
         <div class="table-scroll">
@@ -192,12 +186,12 @@ const pages = {
               <col style="width:64px"><col>
             </colgroup>
             <thead><tr>
-              <th class="nw">时间</th><th class="nw">模型</th><th class="nw">实际模型</th>
-              <th class="nw">出口</th><th class="nw">账号</th><th class="nw">状态</th>
-              <th class="nw">首字</th><th class="nw">总用时</th>
-              <th class="nw">输入</th><th class="nw">输出</th><th>接口</th>
+              <th class="nw">${t('时间')}</th><th class="nw">${t('模型')}</th><th class="nw">${t('实际模型')}</th>
+              <th class="nw">${t('出口')}</th><th class="nw">${t('账号')}</th><th class="nw">${t('状态')}</th>
+              <th class="nw">${t('首字')}</th><th class="nw">${t('总用时')}</th>
+              <th class="nw">${t('输入')}</th><th class="nw">${t('输出')}</th><th>${t('接口')}</th>
             </tr></thead>
-            <tbody><tr><td colspan="11" class="empty">加载中...</td></tr></tbody>
+            <tbody><tr><td colspan="11" class="empty">${t('加载中...')}</td></tr></tbody>
           </table>
         </div>
         <div class="pager" id="reqPager"></div>
@@ -209,22 +203,14 @@ const pages = {
     const data = await api('api/proxies');
     return `
       <div class="panel page-fill">
-        <h2>代理池
-          <span class="controls"><button class="btn" onclick="addProxy()">+ 添加代理</button></span>
+        <h2>${t('代理池')}
+          <span class="controls"><button class="btn" onclick="addProxy()">+ ${t('添加代理')}</button></span>
         </h2>
         <details class="note">
-          <summary>每个代理是一个独立 IP slot</summary>
-          <div class="body">
-            每个代理享有独立的并发 / RPM / RPH 配额，<b>配越多代理，总容量线性放大</b>。
-            请求会自动找有空位的代理，都满则返回 HTTP 429。失败 5 次自动熔断，
-            「重置」可手动恢复。<br><br>
-            注意：配了至少一个代理后<b>默认不会再退回直连</b>，避免代理满了把主机 IP 也打爆；
-            要可用性优先可以在「设置」页打开「无可用代理时退回直连」。熔断的代理默认歇
-            120 分钟自动放回池子（实测被拦的出口 106-121 分钟自恢复），也可以在这里手动重置。
-            实测单个出口打 80-180 次就会被 Google 拦，所以扩容只能靠加出口。
-          </div>
+          <summary>${t('每个代理是一个独立 IP slot')}</summary>
+          <div class="body">${t(NOTE_PROXY)}</div>
         </details>
-        <div class="hint" style="margin:0 0 12px;">代理可以在 Cookie 池里被某个账号独占绑定：独占后其他账号和匿名请求都不会用它，删除也会被拒绝（先去 Cookie 池解绑）。同一个 URL 不能建两条代理，否则独占会绕过。</div>
+        <div class="hint" style="margin:0 0 12px;">${t('代理可以在 Cookie 池里被某个账号独占绑定：独占后其他账号和匿名请求都不会用它，删除也会被拒绝（先去 Cookie 池解绑）。同一个 URL 不能建两条代理，否则独占会绕过。')}</div>
         <div class="table-scroll">
           <table>
             <colgroup>
@@ -233,8 +219,8 @@ const pages = {
               <col style="width:200px"><col style="width:186px">
             </colgroup>
             <thead><tr>
-              <th class="nw">ID</th><th class="nw">名称</th><th>代理 URL</th><th class="nw">状态</th>
-              <th class="nw">专属账号</th><th class="nw">失败</th><th class="nw">最近错误</th><th class="nw">操作</th>
+              <th class="nw">${t('ID')}</th><th class="nw">${t('名称')}</th><th>${t('代理 URL')}</th><th class="nw">${t('状态')}</th>
+              <th class="nw">${t('专属账号')}</th><th class="nw">${t('失败')}</th><th class="nw">${t('最近错误')}</th><th class="nw">${t('操作')}</th>
             </tr></thead>
             <tbody>${(data.items || []).map(p => `
               <tr>
@@ -242,23 +228,23 @@ const pages = {
                 <td class="truncate" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
                 <td class="pre truncate" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</td>
                 <td class="nw">${
-                  p.state === 'disabled' ? '<span class="badge muted">已禁用</span>'
+                  p.state === 'disabled' ? '<span class="badge muted">' + t('已禁用') + '</span>'
                   : p.state === 'cooling' ? `<span class="badge fail" title="${LANG === 'es' ? 'Falló ' + p.fail_count + ' veces consecutivas, enfriamiento del disyuntor activo' : (LANG === 'en' ? 'Failed ' + p.fail_count + ' consecutive times, circuit breaker cooling' : '连续失败 ' + p.fail_count + ' 次，熔断冷却中')}">${LANG === 'es' ? 'Enfriamiento ' + (p.cooldown_remaining_sec || 0) + 's' : (LANG === 'en' ? 'Cooldown ' + (p.cooldown_remaining_sec || 0) + 's' : '冷却 ' + (p.cooldown_remaining_sec || 0) + 's')}</span>`
-                  : '<span class="badge ok">已启用</span>'
+                  : '<span class="badge ok">' + t('已启用') + '</span>'
                 }</td>
                 <td class="nw">${p.exclusive_account_id
-                  ? `<span class="badge warn" title="这个 IP 只允许该账号使用；删除前需先解绑">${escapeHtml(p.exclusive_account_label || ('#' + p.exclusive_account_id))}</span>`
-                  : '<span class="badge muted">共享</span>'}</td>
+                  ? `<span class="badge warn" title="${t('这个 IP 只允许该账号使用；删除前需先解绑')}">${escapeHtml(p.exclusive_account_label || ('#' + p.exclusive_account_id))}</span>`
+                  : '<span class="badge muted">' + t('共享') + '</span>'}</td>
                 <td class="num nw">${p.fail_count > 0 ? '<span class="badge fail">' + p.fail_count + '</span>' : p.fail_count}</td>
                 <td class="pre truncate" title="${escapeHtml(t(p.last_error || ''))}">${escapeHtml(t(p.last_error) || '—')}</td>
                 <td class="nw">
                   <span class="actions">
-                    <button class="btn muted" onclick="toggleProxy(${p.id})">${p.enabled ? '禁用' : '启用'}</button>
-                    <button class="btn muted" onclick="resetProxy(${p.id})">重置</button>
-                    <button class="btn danger" onclick="delProxy(${p.id})">删除</button>
+                    <button class="btn muted" onclick="toggleProxy(${p.id})">${p.enabled ? t('禁用') : t('启用')}</button>
+                    <button class="btn muted" onclick="resetProxy(${p.id})">${t('重置')}</button>
+                    <button class="btn danger" onclick="delProxy(${p.id})">${t('删除')}</button>
                   </span>
                 </td>
-              </tr>`).join('') || '<tr><td colspan="8" class="empty">还没有代理。点「+ 添加代理」加一个。</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="8" class="empty">' + t('还没有代理。点「+ 添加代理」加一个。') + '</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -272,24 +258,16 @@ const pages = {
     const deadN = items.filter(a => a.health === 'dead').length;
     return `
       <div class="panel page-fill">
-        <h2>Cookie 池
+        <h2>${t('Cookie 池')}
           <span class="controls">
             ${deadN > 0 ? '<span class="badge fail" style="margin-right:8px" title="' + t('这些号鉴权在失败，多半 cookie 过期了，建议用 Firefox 重新导出') + '">' + deadN + ' ' + t('疑似失效') + '</span>' : ''}
             <span class="badge ${data.enabled > 0 ? 'ok' : 'muted'}" style="margin-right:8px">${LANG === 'es' ? (data.enabled || 0) + ' activas / ' + (data.total || 0) + ' total' : (LANG === 'en' ? (data.enabled || 0) + ' active / ' + (data.total || 0) + ' total' : (data.enabled || 0) + ' 启用 / ' + (data.total || 0) + ' 共')}</span>
-            <button class="btn" onclick="addCookieAcct()">+ 导入 Cookie</button>
+            <button class="btn" onclick="addCookieAcct()">+ ${t('导入 Cookie')}</button>
           </span>
         </h2>
         <details class="note">
-          <summary>每行一个 Google 登录态账号</summary>
-          <div class="body">
-            粘贴 gemini.google.com 下的<b>完整 cookie 串</b>（至少含 SID / HSID / SSID /
-            APISID / SAPISID / __Secure-1PSID / __Secure-1PSIDTS）。请求时按<b>最久未用优先</b>自动轮转挑一个
-            启用的账号，媒体生成有每账号 10/天 的配额，配越多号总容量越大。<br><br>
-            凭证保存后<b>不再回传浏览器</b>，列表只显示脱敏摘要（cookie 数 / 关键项 /
-            SAPISID 末 4 位 / 失败次数）。缺 <code>__Secure-1PSIDTS</code> 的号会标黄，
-            首次保活会尝试向 Google 补发；若反复失败请用 <b>Firefox</b> 重新导出
-            （Chrome 新版本的设备绑定会话续不了）。
-          </div>
+          <summary>${t('每行一个 Google 登录态账号')}</summary>
+          <div class="body">${t(NOTE_COOKIE)}</div>
         </details>
         <div class="table-scroll">
           <table>
@@ -300,33 +278,33 @@ const pages = {
               <col style="width:150px"><col><col style="width:150px">
             </colgroup>
             <thead><tr>
-              <th class="nw">ID</th><th class="nw">标签</th><th class="nw">状态</th>
-              <th class="nw">出口</th><th class="nw">可用性</th>
-              <th class="nw">关键 Cookie</th><th class="nw">SAPISID</th><th class="nw">失败</th>
-              <th class="nw">最近成功</th><th>最近错误</th><th class="nw">操作</th>
+              <th class="nw">${t('ID')}</th><th class="nw">${t('标签')}</th><th class="nw">${t('状态')}</th>
+              <th class="nw">${t('出口')}</th><th class="nw">${t('可用性')}</th>
+              <th class="nw">${t('关键 Cookie')}</th><th class="nw">${t('SAPISID')}</th><th class="nw">${t('失败')}</th>
+              <th class="nw">${t('最近成功')}</th><th>${t('最近错误')}</th><th class="nw">${t('操作')}</th>
             </tr></thead>
             <tbody>${items.map(a => `
               <tr class="${a.health === 'dead' ? 'row-dead' : ''}">
                 <td class="num nw">${a.id}</td>
-                <td class="truncate" title="${escapeHtml(a.label || '')}">${a.label ? escapeHtml(a.label) : '<span class="badge muted">未命名</span>'}${a.authuser > 0 ? ` <span class="badge muted" title="${LANG === 'es' ? 'Índice de cuenta: solicitudes van a /u/' + a.authuser + '/' : (LANG === 'en' ? 'Account index: requests go to /u/' + a.authuser + '/' : '账号序号：请求走 /u/' + a.authuser + '/')}">/u/${a.authuser}</span>` : ''}</td>
+                <td class="truncate" title="${escapeHtml(a.label || '')}">${a.label ? escapeHtml(a.label) : '<span class="badge muted">' + t('未命名') + '</span>'}${a.authuser > 0 ? ` <span class="badge muted" title="${LANG === 'es' ? 'Índice de cuenta: solicitudes van a /u/' + a.authuser + '/' : (LANG === 'en' ? 'Account index: requests go to /u/' + a.authuser + '/' : '账号序号：请求走 /u/' + a.authuser + '/')}">/u/${a.authuser}</span>` : ''}</td>
                 <td class="nw">${
-                  a.health === 'dead' ? '<span class="badge fail" title="鉴权在失败，多半 cookie 过期了，建议用 Firefox 重新导出">疑似失效</span>'
-                  : a.health === 'disabled' ? '<span class="badge muted">禁用</span>'
-                  : a.health === 'unknown' ? '<span class="badge warn" title="还没成功用过，点「检测」确认">待检测</span>'
-                  : '<span class="badge ok">正常</span>'
+                  a.health === 'dead' ? '<span class="badge fail" title="' + t('鉴权在失败，多半 cookie 过期了，建议用 Firefox 重新导出') + '">' + t('疑似失效') + '</span>'
+                  : a.health === 'disabled' ? '<span class="badge muted">' + t('禁用') + '</span>'
+                  : a.health === 'unknown' ? '<span class="badge warn" title="' + t('还没成功用过，点「检测」确认') + '">' + t('待检测') + '</span>'
+                  : '<span class="badge ok">' + t('正常') + '</span>'
                 }</td>
                 <td class="nw">${a.proxy_id
-                  ? `<span class="badge ${a.proxy_exclusive ? 'warn' : 'muted'}" title="${escapeHtml(a.proxy_name || '')}">${escapeHtml(a.proxy_name || ('#' + a.proxy_id))}${a.proxy_exclusive ? ' · 独占' : ''}</span>`
-                  : '<span class="badge muted" title="按调度自动选择共享出口">自动</span>'}</td>
+                  ? `<span class="badge ${a.proxy_exclusive ? 'warn' : 'muted'}" title="${escapeHtml(a.proxy_name || '')}">${escapeHtml(a.proxy_name || ('#' + a.proxy_id))}${a.proxy_exclusive ? ' · ' + t('独占') : ''}</span>`
+                  : '<span class="badge muted" title="' + t('按调度自动选择共享出口') + '">' + t('自动') + '</span>'}</td>
                 <td class="nw">${
-                  a.status !== 'enabled' ? '<span class="badge muted">已停用</span>'
+                  a.status !== 'enabled' ? '<span class="badge muted">' + t('已停用') + '</span>'
                   : a.available === false
                     ? `<span class="badge fail" title="${escapeHtml(t(a.unavailable_reason || 'IP 冷却中，Cookie 暂不可用'))}">${t('IP 冷却中')}${a.proxy_retry_after ? ' ' + a.proxy_retry_after + 's' : ''}</span>`
-                    : '<span class="badge ok">可用</span>'
+                    : '<span class="badge ok">' + t('可用') + '</span>'
                 }</td>
                 <td class="nw" title="${LANG === 'es' ? 'Total ' + a.cookie_count + ' cookies, cookies clave: ' + (a.key_cookies||[]).join(' / ') : (LANG === 'en' ? 'Total ' + a.cookie_count + ' cookies, key items: ' + (a.key_cookies||[]).join(' / ') : '共 ' + a.cookie_count + ' 个 cookie，关键项：' + (a.key_cookies||[]).join(' / '))}">
-                  <span class="badge ${a.has_1psidts ? 'ok' : 'warn'}">${(a.key_cookies||[]).length}/9 项</span>
-                  ${a.has_1psidts ? '' : '<span class="badge warn" title="缺 __Secure-1PSIDTS，首次保活会尝试补发；失败请用 Firefox 重新导出">缺 TS</span>'}
+                  <span class="badge ${a.has_1psidts ? 'ok' : 'warn'}">${(a.key_cookies||[]).length}/9 ${t('项')}</span>
+                  ${a.has_1psidts ? '' : '<span class="badge warn" title="' + t('缺 __Secure-1PSIDTS，首次保活会尝试补发；失败请用 Firefox 重新导出') + '">' + t('缺 TS') + '</span>'}
                 </td>
                 <td class="pre nw">${a.sapisid_tail ? '…' + escapeHtml(a.sapisid_tail) : '—'}</td>
                 <td class="num nw">${a.fail_count > 0 ? '<span class="badge fail">' + a.fail_count + '</span>' : 0}</td>
@@ -334,14 +312,14 @@ const pages = {
                 <td class="pre truncate" title="${escapeHtml(t(a.last_error || ''))}">${escapeHtml(t(a.last_error) || '—')}</td>
                 <td class="nw">
                   <span class="actions">
-                    <button class="btn muted" onclick="checkCookieAcct(${a.id}, this)">检测</button>
-                    <button class="btn muted" onclick="rotateCookieAcct(${a.id}, this)">保活</button>
-                    <button class="btn muted" onclick="toggleCookieAcct(${a.id})">${a.status === 'enabled' ? '禁用' : '启用'}</button>
-                    <button class="btn muted" onclick="editCookieAcct(${a.id}, ${JSON.stringify(a.label || '').replace(/"/g, '&quot;')}, ${JSON.stringify(a.note || '').replace(/"/g, '&quot;')}, ${a.authuser || 0}, ${a.proxy_id || 0}, ${a.proxy_exclusive ? 'true' : 'false'})">编辑</button>
-                    <button class="btn danger" onclick="delCookieAcct(${a.id})">删除</button>
+                    <button class="btn muted" onclick="checkCookieAcct(${a.id}, this)">${t('检测')}</button>
+                    <button class="btn muted" onclick="rotateCookieAcct(${a.id}, this)">${t('保活')}</button>
+                    <button class="btn muted" onclick="toggleCookieAcct(${a.id})">${a.status === 'enabled' ? t('禁用') : t('启用')}</button>
+                    <button class="btn muted" onclick="editCookieAcct(${a.id}, ${JSON.stringify(a.label || '').replace(/"/g, '&quot;')}, ${JSON.stringify(a.note || '').replace(/"/g, '&quot;')}, ${a.authuser || 0}, ${a.proxy_id || 0}, ${a.proxy_exclusive ? 'true' : 'false'})">${t('编辑')}</button>
+                    <button class="btn danger" onclick="delCookieAcct(${a.id})">${t('删除')}</button>
                   </span>
                 </td>
-              </tr>`).join('') || '<tr><td colspan="11" class="empty">Cookie 池是空的。点「+ 导入 Cookie」加一个登录态账号。</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="11" class="empty">' + t('Cookie 池是空的。点「+ 导入 Cookie」加一个登录态账号。') + '</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -368,12 +346,12 @@ const pages = {
     };
     return `
       <div class="panel page-fill">
-        <h2>API Keys
-          <span class="controls"><button class="btn" onclick="addKey()">+ 新增 Key</button></span>
+        <h2>${t('API Keys')}
+          <span class="controls"><button class="btn" onclick="addKey()">+ ${t('新增 Key')}</button></span>
         </h2>
         <details class="note">
-          <summary>多把 Key，各自限制可用账号</summary>
-          <div class="body">每个 Key 默认允许全部账号；关闭「允许全部账号」后只使用勾选的 Cookie 账号，一个都不勾时只能走匿名能力（登录态模型会从该 Key 的模型列表隐藏，请求返回 403）。<br><br><code>--api-key</code> / <code>API_KEY</code> 提供的是<b>部署 Key</b>：永远启用、允许全部账号、面板只读，不能改值或删除；它和这里新增的 Key 同时有效。列表只显示脱敏值，需要完整 Key 时点「显示」。</div>
+          <summary>${t('多把 Key，各自限制可用账号')}</summary>
+          <div class="body">${t(NOTE_KEY)}</div>
         </details>
         <div class="table-scroll">
           <table>
@@ -383,29 +361,29 @@ const pages = {
               <col style="width:210px">
             </colgroup>
             <thead><tr>
-              <th class="nw">ID</th><th class="nw">名称</th><th>Key</th>
-              <th class="nw">状态</th><th class="nw">允许账号</th><th class="nw">创建时间</th>
-              <th class="nw">操作</th>
+              <th class="nw">${t('ID')}</th><th class="nw">${t('名称')}</th><th>${t('Key')}</th>
+              <th class="nw">${t('状态')}</th><th class="nw">${t('允许账号')}</th><th class="nw">${t('创建时间')}</th>
+              <th class="nw">${t('操作')}</th>
             </tr></thead>
             <tbody>${items.map(k => `
               <tr>
                 <td class="num nw">${k.id === 0 ? '—' : k.id}</td>
-                <td class="truncate" title="${escapeHtml(k.name || '')}">${escapeHtml(k.name || '')}${k.locked ? ' <span class="badge warn">部署</span>' : ''}</td>
+                <td class="truncate" title="${escapeHtml(k.name || '')}">${escapeHtml(k.name || '')}${k.locked ? ' <span class="badge warn">' + t('部署') + '</span>' : ''}</td>
                 <td class="pre truncate" title="${escapeHtml(k.masked_key || '')}">${escapeHtml(k.masked_key || '—')}</td>
-                <td class="nw">${k.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge muted">停用</span>'}</td>
+                <td class="nw">${k.enabled ? '<span class="badge ok">' + t('启用') + '</span>' : '<span class="badge muted">' + t('停用') + '</span>'}</td>
                 <td class="nw">${allowCell(k)}</td>
                 <td class="nw" style="font-size:12px;color:var(--muted)">${k.created_at ? fmt.ts(k.created_at) : '—'}</td>
                 <td class="nw">
                   <span class="actions">
-                    <button class="btn muted" onclick="revealKey(${k.id})">显示</button>
+                    <button class="btn muted" onclick="revealKey(${k.id})">${t('显示')}</button>
                     ${k.locked ? '' : `
-                      <button class="btn muted" onclick="editKey(${k.id})">编辑</button>
-                      <button class="btn muted" onclick="rotateKeyById(${k.id})">轮换</button>
-                      <button class="btn muted" onclick="toggleKey(${k.id})">${k.enabled ? '停用' : '启用'}</button>
-                      <button class="btn danger" onclick="delKey(${k.id})">删除</button>`}
+                      <button class="btn muted" onclick="editKey(${k.id})">${t('编辑')}</button>
+                      <button class="btn muted" onclick="rotateKeyById(${k.id})">${t('轮换')}</button>
+                      <button class="btn muted" onclick="toggleKey(${k.id})">${k.enabled ? t('停用') : t('启用')}</button>
+                      <button class="btn danger" onclick="delKey(${k.id})">${t('删除')}</button>`}
                   </span>
                 </td>
-              </tr>`).join('') || '<tr><td colspan="7" class="empty">还没有额外的 API Key。部署 Key 不存在时需要新增一把。</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="7" class="empty">' + t('还没有额外的 API Key。部署 Key 不存在时需要新增一把。') + '</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -417,52 +395,49 @@ const pages = {
     return `
       <div class="grid-main">
         <div class="panel">
-          <h2>运行时配置</h2>
+          <h2>${t('运行时配置')}</h2>
           <p class="lede">
-            改完点保存<b>立刻生效</b>，不用重启。存在数据库里，优先级高于
-            <code>config.json</code> 和命令行参数。
+            ${t('改完点保存立刻生效，不用重启。存在数据库里，优先级高于 config.json 和命令行参数。')}
           </p>
           <div id="rtCfgForm"></div>
           <div class="cfg-actions">
-            <button class="btn" onclick="saveRtCfg()">保存并生效</button>
-            <button class="btn muted" onclick="loadRtCfg()">放弃修改</button>
+            <button class="btn" onclick="saveRtCfg()">${t('保存并生效')}</button>
+            <button class="btn muted" onclick="loadRtCfg()">${t('放弃修改')}</button>
             <span id="rtCfgMsg" style="font-size:12.5px;"></span>
           </div>
         </div>
 
         <div class="stack">
           <div class="card">
-            <h2>API Keys</h2>
+            <h2>${t('API Keys')}</h2>
             <p class="lede">
-              支持多把 Key，每把可以限制可用账号。完整 Key 只在创建/轮换时显示一次，
-              之后在「API Keys」页按需显示。
+              ${t('支持多把 Key，每把可以限制可用账号。完整 Key 只在创建/轮换时显示一次，之后在「API Keys」页按需显示。')}
             </p>
             <div class="row" style="margin-bottom:10px;">
-              <button class="btn" onclick="switchPage('keys')">管理 API Keys</button>
+              <button class="btn" onclick="switchPage('keys')">${t('管理 API Keys')}</button>
             </div>
             <details class="note">
-              <summary>调用示例</summary>
+              <summary>${t('调用示例')}</summary>
               <div class="body">
-                <pre class="pre" style="margin:0; font-size:11.5px;">curl http://your-host/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_KEY" \
-  -H "Content-Type: application/json" \
+                <pre class="pre" style="margin:0; font-size:11.5px;">curl http://your-host/v1/chat/completions \\
+  -H "Authorization: Bearer YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
   -d '{"model":"gemini-3.6-flash",
-       "messages":[{"role":"user","content":"你好"}]}'</pre>
+       "messages":[{"role":"user","content":"${LANG === 'es' ? '¡Hola!' : (LANG === 'en' ? 'Hello!' : '你好')}"}]}'</pre>
               </div>
             </details>
           </div>
 
           <div class="card">
-            <h2>部署配置</h2>
+            <h2>${t('部署配置')}</h2>
             <p class="lede">
-              改这些本来就要重启进程，所以放在 <code>docker-compose.yml</code> 里管，
-              不做成网页表单——凭证也不该经过浏览器。
+              ${t('改这些本来就要重启进程，所以放在 docker-compose.yml 里管，不做成网页表单——凭证也不该经过浏览器。')}
             </p>
             <table id="deployTable" class="kv">
               <tbody></tbody>
             </table>
             <p class="lede" style="margin:14px 0 0;">
-              gemini-web2api-go · 单二进制 · SQLite · Chrome 146 指纹 · tiktoken cl100k_base 计费
+              ${t('gemini-web2api-go · 单二进制 · SQLite · Chrome 146 指纹 · tiktoken cl100k_base 计费')}
             </p>
           </div>
         </div>
@@ -475,49 +450,48 @@ const pages = {
     return `
       <div class="grid-main">
         <div class="panel">
-          <h2>版本与更新 <button class="btn muted" onclick="checkUpdate(true)">检查更新</button></h2>
+          <h2>${t('版本与更新')} <button class="btn muted" onclick="checkUpdate(true)">${t('检查更新')}</button></h2>
           <table class="kv">
             <tbody>
-              <tr><td>当前版本</td><td><b>${CURRENT_VERSION ? 'v' + escapeHtml(CURRENT_VERSION) : '—'}</b></td></tr>
-              <tr><td>最新版本</td><td id="updLatest">—</td></tr>
-              <tr><td>上次检查</td><td id="updChecked">—</td></tr>
+              <tr><td>${t('当前版本')}</td><td><b>${CURRENT_VERSION ? 'v' + escapeHtml(CURRENT_VERSION) : '—'}</b></td></tr>
+              <tr><td>${t('最新版本')}</td><td id="updLatest">—</td></tr>
+              <tr><td>${t('上次检查')}</td><td id="updChecked">—</td></tr>
             </tbody>
           </table>
           <label class="row" style="margin-top:12px; font-size:12.5px; cursor:pointer;">
             <input type="checkbox" class="switch" id="updAuto" ${updAutoEnabled() ? 'checked' : ''}
                    onchange="setUpdAuto(this.checked)" />
-            <span>打开面板时自动检查更新</span>
+            <span>${t('打开面板时自动检查更新')}</span>
           </label>
-          <p class="lede" style="margin:8px 0 0;">由浏览器直接查询 GitHub，服务端不发任何请求；结果缓存 6 小时。</p>
+          <p class="lede" style="margin:8px 0 0;">${t('由浏览器直接查询 GitHub，服务端不发任何请求；结果缓存 6 小时。')}</p>
           <div id="updBox"></div>
         </div>
 
         <div class="stack">
           <div class="card">
-            <h2>项目</h2>
-            <p class="lede">把 gemini.google.com 网页端反代成 OpenAI / Gemini 兼容 API。开源，MIT 许可。</p>
+            <h2>${t('项目')}</h2>
+            <p class="lede">${t('把 gemini.google.com 网页端反代成 OpenAI / Gemini 兼容 API。开源，MIT 许可。')}</p>
             <table class="kv" style="margin-bottom:14px;">
               <tbody>
-                <tr><td>作者</td><td><a class="link" href="https://github.com/zexadev" target="_blank" rel="noopener">Zexa</a> <span class="muted">@zexadev</span></td></tr>
+                <tr><td>${t('作者')}</td><td><a class="link" href="https://github.com/zexadev" target="_blank" rel="noopener">Zexa</a> <span class="muted">@zexadev</span></td></tr>
               </tbody>
             </table>
             <div class="about-links">
-              <!-- GitHub 没有能直接点上 Star 的链接（/stargazers 是谁点过的列表），只能送到仓库首页 -->
               <a class="btn" href="${REPO_URL}" target="_blank" rel="noopener">
-                ${renderHugeIcon('star', 16)}<span>去 GitHub 点 Star</span></a>
+                ${renderHugeIcon('star', 16)}<span>${t('去 GitHub 点 Star')}</span></a>
             </div>
-            <p class="lede" style="margin:0;">觉得好用就去 GitHub 仓库首页，点右上角的 Star。GitHub 的 topic 页按 Star 排序，这是别人找到这个项目的主要入口。</p>
+            <p class="lede" style="margin:0;">${t('觉得好用就去 GitHub 仓库首页，点右上角的 Star。GitHub 的 topic 页按 Star 排序，这是别人找到这个项目的主要入口。')}</p>
           </div>
 
           <div class="card">
-            <h2>链接</h2>
+            <h2>${t('链接')}</h2>
             <table class="kv">
               <tbody>
-                <tr><td>仓库</td><td><a class="link" href="${REPO_URL}" target="_blank" rel="noopener">github.com/${REPO}</a></td></tr>
-                <tr><td>更新日志</td><td><a class="link" href="${REPO_URL}/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a></td></tr>
-                <tr><td>发布页</td><td><a class="link" href="${REPO_URL}/releases" target="_blank" rel="noopener">Releases</a></td></tr>
-                <tr><td>提交问题</td><td><a class="link" href="${REPO_URL}/issues" target="_blank" rel="noopener">Issues</a></td></tr>
-                <tr><td>许可证</td><td><a class="link" href="${REPO_URL}/blob/main/LICENSE" target="_blank" rel="noopener">MIT</a></td></tr>
+                <tr><td>${t('仓库')}</td><td><a class="link" href="${REPO_URL}" target="_blank" rel="noopener">github.com/${REPO}</a></td></tr>
+                <tr><td>${t('更新日志')}</td><td><a class="link" href="${REPO_URL}/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a></td></tr>
+                <tr><td>${t('发布页')}</td><td><a class="link" href="${REPO_URL}/releases" target="_blank" rel="noopener">Releases</a></td></tr>
+                <tr><td>${t('提交问题')}</td><td><a class="link" href="${REPO_URL}/issues" target="_blank" rel="noopener">Issues</a></td></tr>
+                <tr><td>${t('许可证')}</td><td><a class="link" href="${REPO_URL}/blob/main/LICENSE" target="_blank" rel="noopener">MIT</a></td></tr>
               </tbody>
             </table>
           </div>
@@ -600,7 +574,6 @@ async function loadChart(range = '24h') {
 }
 
 let reqOffset = 0;
-// 每页条数由「每页 N」下拉决定；页面还没渲染时退回 50
 function reqPageSize() {
   const el = document.getElementById('reqSize');
   return el ? parseInt(el.value, 10) : 50;
@@ -632,7 +605,7 @@ async function loadReqs() {
         ${r.error ? '<div class="pre clamp2" style="color:var(--fail);margin-top:4px" title="'
           + escapeHtml(t(r.error)) + '"><b>' + t('错误：') + '</b>' + escapeHtml(t(r.error)) + '</div>' : ''}
       </td>
-    </tr>`).join('') || '<tr><td colspan="11" class="empty">还没有请求记录</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="11" class="empty">' + t('还没有请求记录') + '</td></tr>';
   const size = reqPageSize();
   const total = data.total || 0;
   const page = Math.floor(reqOffset / size) + 1;
@@ -658,7 +631,6 @@ async function loadReqs() {
     const pager = document.getElementById('reqPager');
     if (pager) translateTree(pager, LANG);
   }
-  // populate model dropdown from current page (best-effort)
   const sel = document.getElementById('reqModel');
   if (sel && sel.options.length === 1) {
     const seen = new Set();
@@ -671,12 +643,6 @@ async function loadReqs() {
 }
 
 // ── 运行时配置 ───────────────────────────────────────────────────────────────
-// 字段定义跟后端 RuntimeConfig 一一对应；范围与后端 validateRuntimeConfig 一致，
-// 前端只做提示，真正的校验在后端（浏览器里的限制随便绕）。
-// 必须一一对应：saveRtCfg 只按这里的字段拼 PUT body，后端整体反序列化，漏在这里
-// 列出的 RuntimeConfig 字段每次保存都会被解成零值冲掉（multi_turn 栽过，见 #27）。
-// 按语义分组，组内自适应多列。分组的依据是"改这一项时在想什么"：
-// 调产能 / 调容错 / 调怎么发请求 / 调留多少数据，而不是按字段类型堆在一起。
 const RT_GROUPS = [
   {
     title: '流量控制 · 每个 IP slot 独立计数',
@@ -701,7 +667,7 @@ const RT_GROUPS = [
       { k: 'stream_keepalive_sec', label: '流式保活（秒）', type: 'int', min: 0, max: 300,
         hint: '流式请求连续这么多秒没往客户端写东西，就发一次保活，防止前面的 nginx / Cloudflare / newapi 等中间层因连接空闲回 504。建议 15。代价：保活要先开流（HTTP 200），之后再失败只能在流里报错、拿不到 502/429 状态码，依赖状态码换渠道的客户端会受影响；秒级就失败的请求不受影响。非流式请求无效。0=关（默认）' },
       { k: 'stream_idle_timeout_sec', label: '空闲超时（秒）', type: 'int', min: 0, max: 600,
-        hint: '上游开流后连续这么多秒一个 chunk 都不来，就掐断当瞬时错误重试。「上游超时」是整条请求的总时限，管不到"首字节秒级就到、之后两三分钟一个字不来"这种挂法——这个专补那个缺口，让卡住的请求几十秒就换一次而不是干等到总超时。掐断会无条件重试（不受「超时后重试」开关影响）。建议 60。设得太小会误伤慢模型（如 Argon 首字节本身就慢）。0=关（默认）' },
+        hint: '上游开流后连续这么多秒一个 chunk 都不来，就掐断当瞬时错误重试。「上游超时」是整条请求的总时限，管不到「首字节秒级就到、之后两三分钟一个字不来」这种挂法——这个专补那个缺口，让卡住的请求几十秒就换一次而不是干等到总超时。掐断会无条件重试（不受「超时后重试」开关影响）。建议 60。设得太小会误伤慢模型（如 Argon 首字节本身就慢）。0=关（默认）' },
     ],
   },
   {
@@ -769,8 +735,6 @@ async function loadRtCfg() {
   const data = await api('api/config');
   if (!data) return;
   rtCfgCache = data.config; rtModels = data.models || [];
-  // 每组先放输入框类字段（自适应多列网格），开关单独成行排在下面：开关的说明普遍
-  // 很长，塞进网格的窄列里标签会被挤成一字一行。
   const inputItem = f => {
     const v = rtCfgCache[f.k];
     let input;
@@ -784,28 +748,27 @@ async function loadRtCfg() {
       input = `<input type="text" id="rt_${f.k}" value="${escapeHtml(String(v ?? ''))}">`;
     }
     return `<div class="cfg-item${f.wide ? ' wide' : ''}">
-      <label for="rt_${f.k}">${f.label}</label>
+      <label for="rt_${f.k}">${t(f.label)}</label>
       ${input}
-      ${f.hint ? `<div class="rthint">${escapeHtml(f.hint)}</div>` : ''}
+      ${f.hint ? `<div class="rthint">${escapeHtml(t(f.hint))}</div>` : ''}
     </div>`;
   };
   const toggleItem = f => `<div class="cfg-toggle">
       <input type="checkbox" class="switch" id="rt_${f.k}" ${rtCfgCache[f.k] ? 'checked' : ''}>
-      <label for="rt_${f.k}">${f.label}</label>
-      ${f.hint ? `<div class="rthint">${escapeHtml(f.hint)}</div>` : ''}
+      <label for="rt_${f.k}">${t(f.label)}</label>
+      ${f.hint ? `<div class="rthint">${escapeHtml(t(f.hint))}</div>` : ''}
     </div>`;
   document.getElementById('rtCfgForm').innerHTML = RT_GROUPS.map(g => {
     const inputs = g.fields.filter(f => f.type !== 'bool');
     const toggles = g.fields.filter(f => f.type === 'bool');
     return `
     <div class="cfg-group">
-      <h3>${escapeHtml(g.title)}</h3>
+      <h3>${escapeHtml(t(g.title))}</h3>
       ${inputs.length ? `<div class="cfg-grid">${inputs.map(inputItem).join('')}</div>` : ''}
       ${toggles.length ? `<div class="cfg-toggles${inputs.length ? ' after-grid' : ''}">${toggles.map(toggleItem).join('')}</div>` : ''}
     </div>`;
   }).join('');
 
-  // 三列（项/值/怎么改）挤在窄栏里读不动，第三列换成 title 悬浮
   const d = data.deploy || {};
   document.querySelector('#deployTable tbody').innerHTML = [
     ['监听', `${escapeHtml(d.host || '')}:${d.port}`, 'compose 的 ports + --port'],
@@ -870,11 +833,6 @@ function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// 服务端会静默降级（例如请求 4 Carbon 实际给的是 3.5 Flash-Lite），只看请求名发现不了。
-// upstream_model 取自响应帧里服务端自报的显示名；跟请求的对不上时标黄。
-//
-// 媒体模型例外：生图/音乐的后端名（Nano Banana / Lyria）跟请求名本来就不同，是预期
-// 映射不是降级——真失败会直接报错不落 200 记录，所以这里把它们当"一致"，不误标黄。
 const upstreamExpected = { image: 'nanobanana', music: 'lyria' };
 function upstreamCell(r) {
   const up = r.upstream_model || '';
@@ -891,14 +849,15 @@ function upstreamCell(r) {
 
 async function addProxy() {
   const data = await modalForm({
-    title: '添加代理',
-    desc: '一个代理 = 一个独立 IP slot，享有独立的并发/RPM/RPH 配额。',
+    title: t('添加代理'),
+    desc: t('一个代理 = 一个独立 IP slot，享有独立的并发/RPM/RPH 配额。'),
     fields: [
-      { name: 'name', label: '名称', placeholder: 'vps-uk-1', required: true,
-        hint: '随便起，admin 面板里用来区分' },
-      { name: 'url', label: '代理 URL', placeholder: 'http://user:pass@1.2.3.4:8080', required: true,
-        hint: '支持 http:// / https:// / socks5:// 协议' },
+      { name: 'name', label: t('名称'), placeholder: 'vps-uk-1', required: true,
+        hint: t('随便起，admin 面板里用来区分') },
+      { name: 'url', label: t('代理 URL'), placeholder: 'http://user:pass@1.2.3.4:8080', required: true,
+        hint: t('支持 http:// / https:// / socks5:// 协议') },
     ],
+    submitText: t('添加'),
   });
   if (!data) return;
   const r = await fetch('api/proxies', {
@@ -913,16 +872,16 @@ async function addProxy() {
 }
 async function delProxy(id) {
   const ok = await modalConfirm({
-    title: '删除代理',
+    title: t('删除代理'),
     desc: LANG === 'es' ? `¿Estás seguro de eliminar el proxy #${id}? Esta acción no se puede deshacer. Los proxys reservados por una cookie deben desvincularse primero.` : (LANG === 'en' ? `Delete proxy #${id}? This cannot be undone. Proxies exclusively bound to a Cookie must be unbound first.` : `确定删除代理 #${id}？此操作不可撤销。被 Cookie 独占绑定的代理需要先解绑。`),
-    confirmText: '删除',
+    confirmText: t('删除'),
     danger: true,
   });
   if (!ok) return;
   const r = await fetch('api/proxies/' + id, { method: 'DELETE', credentials: 'include' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) return flash(t('删除失败：') + t(j.error || ('HTTP ' + r.status)));
-  flash('已删除');
+  flash(t('已删除'));
   await refreshPage();
 }
 async function toggleProxy(id) {
@@ -931,14 +890,11 @@ async function toggleProxy(id) {
 }
 async function resetProxy(id) {
   await api('api/proxies/' + id + '/reset', { method: 'POST' });
-  flash('已重置失败计数');
+  flash(t('已重置失败计数'));
   await refreshPage();
 }
-// Cookie 池 ────────────────────────────────────────────────────────────────
 
-// 逐项模式列出的 cookie。顺序按"从 DevTools 里找的难易"排，不是字母序。
-// req 只标 SAPISID：后端也只强制这一项（要用它算 SAPISIDHASH 授权头），
-// 其余缺了不一定不能用，标成必填会把能用的号挡在外面。
+// Cookie 池 ────────────────────────────────────────────────────────────────
 const COOKIE_KEYS = [
   { k: '__Secure-1PSID', hint: '主会话' },
   { k: 'SAPISID', req: true, hint: '算授权头用，缺了会被当匿名' },
@@ -946,7 +902,6 @@ const COOKIE_KEYS = [
   { k: 'SID' }, { k: 'HSID' }, { k: 'SSID' }, { k: 'APISID' },
 ];
 
-// 把 "k=v; k=v" 拆成对象。值里可能含 '='（base64 补位），所以只在第一个等号处切。
 function parseCookieStr(s) {
   const out = {};
   (s || '').split(';').forEach(p => {
@@ -963,31 +918,28 @@ function joinCookieObj(obj) {
 }
 
 async function addCookieAcct() {
-  // 两个模式共用这一份状态，切 tab 时互相带过去。extras 存的是不在
-  // COOKIE_KEYS 里的项——整串粘贴进来的 cookie 往往还带一堆别的，
-  // 切到逐项再切回去不能把它们弄丢。
   let extras = {};
 
   const data = await buildModal({
-    title: '导入 Cookie',
+    title: t('导入 Cookie'),
     wide: true,
-    desc: '浏览器 F12 → Application → Cookies → 选 <code>https://gemini.google.com</code>。逐项抄或整串粘贴都行，两种填法可随时切换，已填的内容会带过去。',
+    desc: t('浏览器 F12 → Application → Cookies → 选 <code>https://gemini.google.com</code>。逐项抄或整串粘贴都行，两种填法可随时切换，已填的内容会带过去。'),
     bodyHTML: `
       <div class="field">
-        <label>标签</label>
-        <input data-name="label" type="text" placeholder="例如账号邮箱，可留空" />
-        <div class="hint">仅用于面板里区分账号，不参与请求。</div>
+        <label>${t('标签')}</label>
+        <input data-name="label" type="text" placeholder="${t('例如账号邮箱，可留空')}" />
+        <div class="hint">${t('仅用于面板里区分账号，不参与请求。')}</div>
       </div>
 
       <div class="field">
-        <label>账号序号</label>
+        <label>${t('账号序号')}</label>
         <input data-name="authuser" type="text" inputmode="numeric" value="0" />
-        <div class="hint">浏览器里同时登了多个 Google 号才需要改：打开那个号的 Gemini，地址栏是 /u/1/ 就填 1，没有 /u/ 就是 0。同一串 cookie 想当几个号用，就导入几次、各填各的序号。</div>
+        <div class="hint">${t('浏览器里同时登了多个 Google 号才需要改：打开那个号的 Gemini，地址栏是 /u/1/ 就填 1，没有 /u/ 就是 0。同一串 cookie 想当几个号用，就导入几次、各填各的序号。')}</div>
       </div>
 
       <div class="segbar" data-role="seg">
-        <button type="button" data-mode="raw" class="on">整串粘贴（推荐）</button>
-        <button type="button" data-mode="fields">逐项填写</button>
+        <button type="button" data-mode="raw" class="on">${t('整串粘贴（推荐）')}</button>
+        <button type="button" data-mode="fields">${t('逐项填写')}</button>
       </div>
 
       <div data-pane="fields" style="display:none;">
@@ -996,31 +948,26 @@ async function addCookieAcct() {
             <div class="field${c.k.length > 12 ? ' wide' : ''}">
               <label>${escapeHtml(c.k)}${c.req ? ' <span class="req">*</span>' : ''}</label>
               <input data-ck="${escapeHtml(c.k)}" type="text" autocomplete="off" spellcheck="false"
-                     placeholder="${escapeHtml(c.hint || '')}" />
+                     placeholder="${escapeHtml(t(c.hint || ''))}" />
             </div>`).join('')}
         </div>
         <div class="ck-extra" data-role="extras"></div>
-        <div class="ck-extra">前三项是同类项目实践里的最小可用集合，下面四项补齐更稳。
-        抓包实测浏览器每次实际会发 <b>20 多个</b> cookie，而我们把整串原样转发
-        （代码里只解析 SAPISID 用来算授权头），所以
-        <b>整串粘贴比逐项填更接近真实浏览器</b>；逐项模式适合手头只有零散几项时用。</div>
+        <div class="ck-extra">${t('前三项是同类项目实践里的最小可用集合，下面四项补齐更稳。 抓包实测浏览器每次实际会发 <b>20 多个</b> cookie，而我们把整串原样转发 （代码里只解析 SAPISID 用来算授权头），所以 <b>整串粘贴比逐项填更接近真实浏览器</b>；逐项模式适合手头只有零散几项时用。')}</div>
       </div>
 
       <div data-pane="raw">
         <div class="field">
           <textarea data-name="cookie" rows="6" spellcheck="false"
             placeholder="SID=...; HSID=...; SSID=...; APISID=...; SAPISID=...; __Secure-1PSID=...; __Secure-1PSIDTS=..."></textarea>
-          <div class="hint">整行粘贴，分号分隔。至少要含 SAPISID 和 __Secure-1PSID。
-          建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。DevTools 里全选复制即可，
-          多余的项会一并保留 —— 发得越全越像真实浏览器。</div>
+          <div class="hint">${t('整行粘贴，分号分隔。至少要含 SAPISID 和 __Secure-1PSID。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。DevTools 里全选复制即可， 多余的项会一并保留 —— 发得越全越像真实浏览器。')}</div>
         </div>
       </div>
 
       <div class="field" style="margin-top:14px;">
-        <label>备注</label>
-        <input data-name="note" type="text" placeholder="可留空" />
+        <label>${t('备注')}</label>
+        <input data-name="note" type="text" placeholder="${t('可留空')}" />
       </div>`,
-    submitText: '导入',
+    submitText: t('导入'),
     onReady: (overlay) => {
       const $ = (s) => overlay.querySelector(s);
       const inputs = () => [...overlay.querySelectorAll('[data-ck]')];
@@ -1055,10 +1002,8 @@ async function addCookieAcct() {
             .forEach(b => b.classList.toggle('on', b === btn));
           $('[data-pane=fields]').style.display = mode === 'fields' ? '' : 'none';
           $('[data-pane=raw]').style.display = mode === 'raw' ? '' : 'none';
-          if (LANG !== 'zh') translateTree(overlay, LANG);
         };
       });
-      // 在逐项模式里直接粘贴一整串时自动拆开，省得用户先去切 tab
       inputs().forEach(el => el.addEventListener('paste', (ev) => {
         const txt = (ev.clipboardData || window.clipboardData).getData('text') || '';
         if (!txt.includes(';') || !txt.includes('=')) return;
@@ -1071,8 +1016,8 @@ async function addCookieAcct() {
       const label = (overlay.querySelector('[data-name=label]').value || '').trim();
       const note = (overlay.querySelector('[data-name=note]').value || '').trim();
       const authuser = parseAuthUser(overlay.querySelector('[data-name=authuser]').value);
-      if (authuser === null) return { error: '账号序号要填 0 到 9 的整数' };
-      const isRaw =overlay.querySelector('[data-role=seg] button.on').dataset.mode === 'raw';
+      if (authuser === null) return { error: t('账号序号要填 0 到 9 的整数') };
+      const isRaw = overlay.querySelector('[data-role=seg] button.on').dataset.mode === 'raw';
       let cookie;
       if (isRaw) {
         cookie = (overlay.querySelector('[data-name=cookie]').value || '').trim();
@@ -1083,8 +1028,8 @@ async function addCookieAcct() {
         });
         cookie = joinCookieObj(obj);
       }
-      if (!cookie) return { error: 'Cookie 不能为空' };
-      if (!cookie.includes('SAPISID')) return { error: 'cookie 里没有 SAPISID，多半没复制全' };
+      if (!cookie) return { error: t('Cookie 不能为空') };
+      if (!cookie.includes('SAPISID')) return { error: t('cookie 里没有 SAPISID，多半没复制全') };
       return { label, cookie, note, authuser };
     },
   });
@@ -1095,12 +1040,11 @@ async function addCookieAcct() {
     body: JSON.stringify(data),
   });
   const j = await r.json();
-  if (j.error) return flash('导入失败：' + j.error);
+  if (j.error) return flash(t('导入失败：') + t(j.error));
   flash(LANG === 'es' ? 'Cookie #' + j.id + ' importada' : (LANG === 'en' ? 'Cookie #' + j.id + ' imported' : 'Cookie 已导入 #' + j.id));
   await refreshPage();
 }
 
-// parseAuthUser 把账号序号输入框的值转成 0..9 的整数，不合法返回 null。空 = 0。
 function parseAuthUser(v) {
   const s = String(v ?? '').trim();
   if (s === '') return 0;
@@ -1124,34 +1068,34 @@ async function editCookieAcct(id, label, note, authuser, proxyID, proxyExclusive
   }).join('');
 
   const ok = await buildModal({
-    title: LANG === 'es' ? 'Editar Cookie #' + id : (LANG === 'en' ? 'Edit Cookie #' + id : '编辑 Cookie #' + id),
+    title: t('编辑 Cookie') + ' #' + id,
     wide: true,
-    desc: '改标签、备注、账号序号和出口绑定。要换 cookie 请删掉重新导入。',
+    desc: t('改标签、备注、账号序号和出口绑定。要换 cookie 请删掉重新导入。'),
     bodyHTML: `
       <div class="field">
-        <label>标签</label>
-        <input data-name="label" type="text" value="${escapeHtml(label || '')}" placeholder="账号邮箱" />
+        <label>${t('标签')}</label>
+        <input data-name="label" type="text" value="${escapeHtml(label || '')}" placeholder="${t('账号邮箱')}" />
       </div>
       <div class="field">
-        <label>账号序号</label>
+        <label>${t('账号序号')}</label>
         <input data-name="authuser" type="text" inputmode="numeric" value="${authuser || 0}" />
-        <div class="hint">浏览器里同时登了多个 Google 号时用：地址栏 /u/1/ 填 1，没有 /u/ 填 0。</div>
+        <div class="hint">${t('浏览器里同时登了多个 Google 号时用：地址栏 /u/1/ 填 1，没有 /u/ 填 0。')}</div>
       </div>
       <div class="field">
-        <label>出口</label>
+        <label>${t('出口')}</label>
         <select data-name="proxy_id">
-          <option value="0" ${!proxyID ? 'selected' : ''}>不绑定（按调度自动选择共享出口）</option>
+          <option value="0" ${!proxyID ? 'selected' : ''}>${t('不绑定（按调度自动选择共享出口）')}</option>
           ${proxyOptions}
         </select>
-        <div class="hint">绑定后优先用这个出口。勾选独占后，这个 IP 只允许本 Cookie 使用，其他账号和匿名请求都不会用它；IP 冷却或容量满时本 Cookie 暂时不可用，不会换别的 IP。</div>
+        <div class="hint">${t('绑定后优先用这个出口。勾选独占后，这个 IP 只允许本 Cookie 使用，其他账号和匿名请求都不会用它；IP 冷却或容量满时本 Cookie 暂时不可用，不会换别的 IP。')}</div>
       </div>
       <label class="row" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
         <input type="checkbox" data-name="proxy_exclusive" ${proxyExclusive ? 'checked' : ''} ${!proxyID ? 'disabled' : ''} />
-        <span>独占此 IP</span>
+        <span>${t('独占此 IP')}</span>
       </label>
       <div class="field" style="margin-top:12px;">
-        <label>备注</label>
-        <input data-name="note" type="text" value="${escapeHtml(note || '')}" placeholder="可留空" />
+        <label>${t('备注')}</label>
+        <input data-name="note" type="text" value="${escapeHtml(note || '')}" placeholder="${t('可留空')}" />
       </div>`,
     onReady: (overlay) => {
       const sel = overlay.querySelector('[data-name=proxy_id]');
@@ -1167,10 +1111,10 @@ async function editCookieAcct(id, label, note, authuser, proxyID, proxyExclusive
       sel.onchange = sync;
       sync();
     },
-    submitText: '保存',
+    submitText: t('保存'),
     onSubmit: async (overlay) => {
       const au = parseAuthUser(overlay.querySelector('[data-name=authuser]').value);
-      if (au === null) return { error: '账号序号要填 0 到 9 的整数' };
+      if (au === null) return { error: t('账号序号要填 0 到 9 的整数') };
       const pid = parseInt(overlay.querySelector('[data-name=proxy_id]').value || '0', 10);
       const excl = overlay.querySelector('[data-name=proxy_exclusive]').checked && pid > 0;
       const payload = {
@@ -1196,8 +1140,6 @@ async function editCookieAcct(id, label, note, authuser, proxyID, proxyExclusive
   }
 }
 
-// 检测 cookie 还有没有登录态。判据是 /app 页面里有没有 SNlM0e——cookie 失效时
-// Gemini 不报错、只是把你当匿名，纯文本请求照样 200，所以不能拿"请求成功"当判据。
 async function checkCookieAcct(id, btn) {
   const old = btn.textContent;
   btn.textContent = t('检测中…'); btn.disabled = true;
@@ -1215,7 +1157,6 @@ async function checkCookieAcct(id, btn) {
   }
 }
 
-// 手动触发一次会话保活（刷新 1PSIDTS + SIDCC）。后台启动 15 秒后跑第一次，之后每 10 分钟。
 async function rotateCookieAcct(id, btn) {
   const old = btn.textContent;
   btn.textContent = '…'; btn.disabled = true;
@@ -1237,21 +1178,21 @@ async function toggleCookieAcct(id) {
 
 async function delCookieAcct(id) {
   const ok = await modalConfirm({
-    title: '删除 Cookie',
+    title: t('删除 Cookie'),
     desc: LANG === 'es' ? `¿Estás seguro de eliminar la cuenta #${id}? Esta acción no se puede deshacer y las solicitudes ya no la usarán.` : (LANG === 'en' ? `Delete account #${id}? This cannot be undone; requests will no longer use it.` : `确定删除账号 #${id}？此操作不可撤销，删除后请求不再用它。`),
-    confirmText: '删除', danger: true,
+    confirmText: t('删除'), danger: true,
   });
   if (!ok) return;
   await api('api/cookies/' + id, { method: 'DELETE' });
-  flash('已删除');
+  flash(t('已删除'));
   await refreshPage();
 }
 
 async function doLogout() {
   const ok = await modalConfirm({
-    title: '退出登录',
-    desc: '退出后需要重新输入管理员 token 才能进来。服务本身不受影响，API 照常提供。',
-    confirmText: '退出',
+    title: t('退出登录'),
+    desc: t('退出后需要重新输入管理员 token 才能进来。服务本身不受影响，API 照常提供。'),
+    confirmText: t('退出'),
     danger: true,
   });
   if (!ok) return;
@@ -1265,7 +1206,6 @@ async function doLogout() {
 async function populateTestProxies() {
   const sel = document.getElementById('testProxy');
   if (!sel) return;
-  // 清掉旧的代理选项（保留前两个固定项）
   while (sel.options.length > 2) sel.remove(2);
   try {
     const data = await api('api/proxies');
@@ -1275,7 +1215,7 @@ async function populateTestProxies() {
       opt.text = (LANG === 'en' ? 'Proxy: ' : '代理: ') + t(p.name);
       sel.appendChild(opt);
     });
-  } catch (e) { /* ignore — login redirect handled in api() */ }
+  } catch (e) {}
 }
 
 async function runTest() {
@@ -1294,7 +1234,7 @@ async function runTest() {
       upstream_error: '<span class="badge fail">' + t('上游错误') + '</span>',
       network_error: '<span class="badge fail">' + t('网络层错误') + '</span>',
     }[r.status] || `<span class="badge muted">${escapeHtml(r.status)}</span>`;
-    const proxyDesc = (t(r.proxy_name) || '-') + (r.use_direct ? '' : (r.proxy_id ? ' (' + t('代理 #' + r.proxy_id) + ')' : ''));
+    const proxyDesc = (t(r.proxy_name) || '-') + (r.use_direct ? '' : (r.proxy_id ? ' (' + t('代理') + ' #' + r.proxy_id + ')' : ''));
     box.innerHTML = `
       <div style="display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; font-size: 13px;">
         <div style="color: var(--muted)">${t('结果')}</div><div>${statusBadge}</div>
@@ -1310,7 +1250,7 @@ async function runTest() {
     `;
     if (LANG !== 'zh') translateTree(box, LANG);
   } catch (e) {
-    box.innerHTML = `<div class="err">${t('测试请求失败：' + e.message)}</div>`;
+    box.innerHTML = `<div class="err">${t('测试请求失败：')} ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1319,7 +1259,7 @@ async function runTest() {
 function copyText(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text)
-      .then(() => flash('已复制到剪贴板'))
+      .then(() => flash(t('已复制到剪贴板')))
       .catch(() => fallbackCopy(text));
     return;
   }
@@ -1332,27 +1272,26 @@ function fallbackCopy(text) {
   ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
   document.body.appendChild(ta);
   ta.select();
-  try { document.execCommand('copy'); flash('已复制（兼容模式）'); }
-  catch (e) { flash('复制失败'); }
+  try { document.execCommand('copy'); flash(t('已复制（兼容模式）')); }
+  catch (e) { flash(t('复制失败')); }
   ta.remove();
 }
 
-// 完整 Key 只在创建/轮换/reveal 时通过这个弹窗出现一次。
 async function showKeyOnce(key, title) {
   if (!key) return;
   await buildModal({
-    title: title || 'API Key',
-    desc: '完整 Key 只在这里显示，请现在复制保存。',
+    title: t(title || 'API Key'),
+    desc: t('完整 Key 只在这里显示，请现在复制保存。'),
     bodyHTML: `
       <div class="field">
         <label>Key</label>
         <div class="row">
           <input data-role="key" type="text" readonly value="${escapeHtml(key)}"
                  style="flex:1;min-width:0;font-family:ui-monospace,monospace" />
-          <button class="btn muted" data-role="copy">复制</button>
+          <button class="btn muted" data-role="copy">${t('复制')}</button>
         </div>
       </div>`,
-    submitText: '完成',
+    submitText: t('完成'),
     onReady: (overlay) => {
       overlay.querySelector('[data-role=copy]').onclick = () => copyText(key);
     },
@@ -1397,29 +1336,29 @@ async function addKey() {
     try { keysAccountsCache = (await api('api/cookies')).items || []; } catch (e) {}
   }
   const data = await buildModal({
-    title: '新增 API Key', wide: true,
-    desc: 'Key 留空会自动生成。关闭「允许全部账号」后只使用勾选的账号；一个都不勾时只能走匿名能力。',
+    title: t('新增 API Key'), wide: true,
+    desc: t('Key 留空会自动生成。关闭「允许全部账号」后只使用勾选的账号；一个都不勾时只能走匿名能力。'),
     bodyHTML: `
-      <div class="field"><label>名称</label>
-        <input data-name="name" type="text" placeholder="例如 team-a" /></div>
-      <div class="field"><label>Key（留空自动生成）</label>
-        <input data-name="key" type="text" autocomplete="off" placeholder="至少 20 字符，或留空" /></div>
+      <div class="field"><label>${t('名称')}</label>
+        <input data-name="name" type="text" placeholder="${t('例如 team-a')}" /></div>
+      <div class="field"><label>${t('Key（留空自动生成）')}</label>
+        <input data-name="key" type="text" autocomplete="off" placeholder="${t('至少 20 字符，或留空')}" /></div>
       <label class="row" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" data-name="allow_all" checked /><span>允许全部账号</span>
+        <input type="checkbox" data-name="allow_all" checked /><span>${t('允许全部账号')}</span>
       </label>
       <div data-role="accts" style="display:none;margin:10px 0 12px;">
-        <div class="hint" style="margin-bottom:6px;">只允许以下账号（可多选）：</div>
+        <div class="hint" style="margin-bottom:6px;">${t('只允许以下账号（可多选）：')}</div>
         <div style="max-height:220px;overflow:auto;border:1px solid #dadce0;border-radius:8px;padding:8px;">
           ${keyAccountListHTML([])}
         </div>
       </div>
-      <div class="field"><label>备注</label>
-        <input data-name="note" type="text" placeholder="可留空" /></div>
+      <div class="field"><label>${t('备注')}</label>
+        <input data-name="note" type="text" placeholder="${t('可留空')}" /></div>
       <label class="row" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" data-name="enabled" checked /><span>启用</span>
+        <input type="checkbox" data-name="enabled" checked /><span>${t('启用')}</span>
       </label>`,
     onReady: keyModalSync,
-    submitText: '创建',
+    submitText: t('创建'),
     onSubmit: (overlay) => {
       const p = keyModalPayload(overlay);
       p.key = (overlay.querySelector('[data-name=key]').value || '').trim() || undefined;
@@ -1434,7 +1373,7 @@ async function addKey() {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) return flash(t('创建失败：') + t(j.error || ('HTTP ' + r.status)));
-  await showKeyOnce(j.key, 'API Key 已生成');
+  await showKeyOnce(j.key, t('API Key 已生成'));
   await refreshPage();
 }
 
@@ -1445,30 +1384,30 @@ async function editKey(id) {
     try { keysAccountsCache = (await api('api/cookies')).items || []; } catch (e) {}
   }
   const data = await buildModal({
-    title: LANG === 'es' ? 'Editar API Key #' + id : (LANG === 'en' ? 'Edit API Key #' + id : '编辑 API Key #' + id), wide: true,
-    desc: '改名称、启用状态和可用账号。要换 Key 值用下面的「自定义 Key」或列表里的「轮换」。',
+    title: t('编辑 API Key') + ' #' + id, wide: true,
+    desc: t('改名称、启用状态和可用账号。要换 Key 值用下面的「自定义 Key」或列表里的「轮换」。'),
     bodyHTML: `
-      <div class="field"><label>名称</label>
+      <div class="field"><label>${t('名称')}</label>
         <input data-name="name" type="text" value="${escapeHtml(k.name || '')}" /></div>
       <label class="row" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" data-name="allow_all" ${k.allow_all ? 'checked' : ''} /><span>允许全部账号</span>
+        <input type="checkbox" data-name="allow_all" ${k.allow_all ? 'checked' : ''} /><span>${t('允许全部账号')}</span>
       </label>
       <div data-role="accts" style="display:none;margin:10px 0 12px;">
-        <div class="hint" style="margin-bottom:6px;">只允许以下账号（可多选）：</div>
+        <div class="hint" style="margin-bottom:6px;">${t('只允许以下账号（可多选）：')}</div>
         <div style="max-height:220px;overflow:auto;border:1px solid #dadce0;border-radius:8px;padding:8px;">
           ${keyAccountListHTML(k.account_ids || [])}
         </div>
       </div>
-      <div class="field"><label>自定义 Key（留空不改）</label>
-        <input data-name="key" type="text" autocomplete="off" placeholder="留空保持当前 Key" />
-        <div class="hint">改 Key 值会让旧 Key 立即失效。</div></div>
-      <div class="field"><label>备注</label>
+      <div class="field"><label>${t('自定义 Key（留空不改）')}</label>
+        <input data-name="key" type="text" autocomplete="off" placeholder="${t('留空保持当前 Key')}" />
+        <div class="hint">${t('改 Key 值会让旧 Key 立即失效。')}</div></div>
+      <div class="field"><label>${t('备注')}</label>
         <input data-name="note" type="text" value="${escapeHtml(k.note || '')}" /></div>
       <label class="row" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" data-name="enabled" ${k.enabled ? 'checked' : ''} /><span>启用</span>
+        <input type="checkbox" data-name="enabled" ${k.enabled ? 'checked' : ''} /><span>${t('启用')}</span>
       </label>`,
     onReady: keyModalSync,
-    submitText: '保存',
+    submitText: t('保存'),
     onSubmit: (overlay) => {
       const p = keyModalPayload(overlay);
       p.key = (overlay.querySelector('[data-name=key]').value || '').trim() || undefined;
@@ -1491,20 +1430,20 @@ async function revealKey(id) {
   const r = await fetch('api/keys/' + id + '/reveal', { method: 'POST', credentials: 'include' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) return flash(t('读取失败：') + t(j.error || ('HTTP ' + r.status)));
-  await showKeyOnce(j.key, id === 0 ? '部署 Key' : 'API Key');
+  await showKeyOnce(j.key, id === 0 ? t('部署 Key') : t('API Key'));
 }
 
 async function rotateKeyById(id) {
   const ok = await modalConfirm({
-    title: '轮换 API Key',
-    desc: '旧 Key 立即失效，所有使用它的客户端都要更换。确定继续？',
-    confirmText: '轮换', danger: true,
+    title: t('轮换 API Key'),
+    desc: t('旧 Key 立即失效，所有使用它的客户端都要更换。确定继续？'),
+    confirmText: t('轮换'), danger: true,
   });
   if (!ok) return;
   const r = await fetch('api/keys/' + id + '/rotate', { method: 'POST', credentials: 'include' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) return flash(t('轮换失败：') + t(j.error || ('HTTP ' + r.status)));
-  await showKeyOnce(j.key, '新的 API Key');
+  await showKeyOnce(j.key, t('新的 API Key'));
   await refreshPage();
 }
 
@@ -1517,15 +1456,15 @@ async function toggleKey(id) {
 
 async function delKey(id) {
   const ok = await modalConfirm({
-    title: '删除 API Key',
+    title: t('删除 API Key'),
     desc: LANG === 'es' ? `¿Estás seguro de eliminar la Key #${id}? Los clientes que la usen perderán el acceso de inmediato, esta acción no se puede deshacer.` : (LANG === 'en' ? `Delete Key #${id}? Clients using it will immediately lose access. This cannot be undone.` : `确定删除 Key #${id}？使用它的客户端会立即失去访问权限，此操作不可撤销。`),
-    confirmText: '删除', danger: true,
+    confirmText: t('删除'), danger: true,
   });
   if (!ok) return;
   const r = await fetch('api/keys/' + id, { method: 'DELETE', credentials: 'include' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.error) return flash(t('删除失败：') + t(j.error || ('HTTP ' + r.status)));
-  flash('已删除');
+  flash(t('已删除'));
   await refreshPage();
 }
 
@@ -1541,10 +1480,6 @@ function flash(msg) {
 }
 
 // 自定义弹窗 ──────────────────────────────────────────────────────────────
-//   modalConfirm({ title, desc, confirmText, danger })       -> bool
-//   modalPrompt({ title, desc, label, placeholder, value })   -> string|null
-//   modalForm({ title, desc, fields: [{name,label,...}], submitText })
-//                                                            -> obj|null
 
 function buildModal({ title, desc, bodyHTML, submitText, danger, wide, allowEnter, onReady, onSubmit }) {
   return new Promise(resolve => {
@@ -1562,8 +1497,6 @@ function buildModal({ title, desc, bodyHTML, submitText, danger, wide, allowEnte
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    // 弹窗挂上 DOM 之后再交给调用方接事件——内容是 innerHTML 灌进去的，
-    // 早于这一步拿不到里面的节点。
     if (onReady) onReady(overlay);
     if (LANG !== 'zh') translateTree(overlay, LANG);
 
@@ -1582,7 +1515,7 @@ function buildModal({ title, desc, bodyHTML, submitText, danger, wide, allowEnte
     overlay.querySelector('[data-act=cancel]').onclick = () => finish(null);
     overlay.querySelector('[data-act=ok]').onclick = async () => {
       const result = onSubmit ? await onSubmit(overlay) : true;
-      if (result === false) return; // validation failed
+      if (result === false) return;
       if (result && typeof result === 'object' && result.error) { showErr(result.error); return; }
       finish(result === true ? true : result);
     };
@@ -1596,7 +1529,6 @@ function buildModal({ title, desc, bodyHTML, submitText, danger, wide, allowEnte
     };
     document.addEventListener('keydown', keyHandler);
 
-    // 自动 focus 第一个 input
     setTimeout(() => {
       const first = overlay.querySelector('input,textarea');
       if (first) first.focus();
@@ -1619,16 +1551,15 @@ function modalPrompt({ title, desc, label, placeholder = '', value = '', hint, p
       <input type="${password ? 'password' : 'text'}" placeholder="${escapeHtml(t(placeholder))}" value="${escapeHtml(value)}" />
       ${hint ? `<div class="hint">${escapeHtml(t(hint))}</div>` : ''}
     </div>`,
-    submitText: '确定',
+    submitText: t('确定'),
     onSubmit: (overlay) => {
       const v = overlay.querySelector('input').value;
-      if (!v) return { error: '不能为空' };
+      if (!v) return { error: t('不能为空') };
       return v;
     },
   });
 }
 
-// fields: [{ name, label, placeholder, hint, value, required, password }]
 function modalForm({ title, desc, fields, submitText = '提交' }) {
   const html = fields.map(f => `
     <div class="field">
@@ -1658,12 +1589,9 @@ function modalForm({ title, desc, fields, submitText = '提交' }) {
 
 let currentPage = null;
 let pageSeq = 0;
-// API Keys 页的数据缓存：编辑弹窗直接用列表里的字段，不用再请求一遍。
 let keysListCache = [];
 let keysAccountsCache = [];
 
-// 点已经选中的导航项直接忽略：重新拉一遍数据、整块内容闪一下再画回原样，
-// 用户看到的只是抖动。要重新取数有「刷新」按钮，走 refreshPage()。
 async function switchPage(name, force = false) {
   if (!force && name === currentPage) return;
   const seq = ++pageSeq;
@@ -1675,9 +1603,8 @@ async function switchPage(name, force = false) {
   if (titleEl) titleEl.textContent = t(PAGE_TITLES[name] || name);
   const main = document.getElementById('main');
 
-  // 旧内容先留着，超过 200ms 还没好才显示占位——快的时候完全不闪
   const slow = setTimeout(() => {
-    if (seq === pageSeq) main.innerHTML = '<div class="empty">加载中…</div>';
+    if (seq === pageSeq) main.innerHTML = '<div class="empty">' + t('加载中…') + '</div>';
   }, 200);
   let html;
   try {
@@ -1688,7 +1615,7 @@ async function switchPage(name, force = false) {
     return;
   }
   clearTimeout(slow);
-  if (seq !== pageSeq) return;   // 期间又点了别的页，丢弃这次结果
+  if (seq !== pageSeq) return;
   main.innerHTML = html;
   if (LANG !== 'zh') translateTree(main, LANG);
   if (name === 'about') renderUpdate();
@@ -1710,9 +1637,7 @@ async function switchPage(name, force = false) {
   }
 }
 
-// 主动重新拉当前页的数据（「刷新」按钮、增删改之后回填）
 function refreshPage() { return switchPage(currentPage, true); }
-
 
 const NAV = [
   ['dashboard', '概览'],
@@ -1763,19 +1688,19 @@ function renderShell() {
     </aside>
     <div class="content">
       <div class="topbar">
-        <h1 class="page-title" id="pageTitle">概览</h1>
+        <h1 class="page-title" id="pageTitle">${t(PAGE_TITLES[currentPage || 'dashboard'] || '概览')}</h1>
         <div class="topbar-right">
           <button class="upd-pill" id="updPill" style="display:none" onclick="switchPage('about')"
                   title="${t('查看更新')}"><span>${t('有新版本')}</span><b id="updPillVer"></b></button>
           <button class="icon-btn" id="themeBtn" onclick="toggleTheme()"
-                  title="${t('切换主题 / Toggle theme')}" aria-label="Toggle theme">
+                  title="${t('切换主题')}" aria-label="${t('切换主题')}">
             ${renderHugeIcon(THEME === 'dark' ? 'sun' : 'moon', 18)}
           </button>
           <a class="icon-btn" href="${REPO_URL}" target="_blank" rel="noopener"
              title="${t('GitHub 仓库')}" aria-label="GitHub">
             ${renderHugeIcon('github', 18)}
           </a>
-          <button class="btn" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="切换语言 / Switch language">EN</button>
+          <button class="btn" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="${t('切换语言 / Switch language')}">EN</button>
           <span class="dot" id="healthDot"></span>
           <span class="muted" id="healthText">${t('运行中')}</span>
         </div>
@@ -1783,12 +1708,11 @@ function renderShell() {
       <main id="main"></main>
     </div>
   `;
-  switchPage('dashboard');
+  switchPage(currentPage || 'dashboard');
   loadSideStat();
   checkUpdate(false);
 }
 
-// 侧栏底部放真正有用的服务状态，而不是一个占位破折号
 async function loadSideStat() {
   const box = document.getElementById('sideStat');
   if (!box) return;
@@ -1839,16 +1763,11 @@ async function doLogin() {
 }
 
 // ── 检查更新 ─────────────────────────────────────────────────────────────
-// 由浏览器直接查 GitHub releases/latest，服务端不发请求：很多部署是内网或只走代理池
-// 出网，让服务端连 GitHub 等于多一条不过代理池的出站连接。api.github.com 允许跨域，
-// 匿名每小时 60 次，所以成功结果缓存 6 小时；失败不缓存，下次打开面板再试。
-// 不做一键自更新：Docker 部署换容器里的文件重启就没了，Windows 也覆盖不了运行中的 exe，
-// 所以只给出按部署方式的现成命令和下载链接。
 const REPO = 'ElJoker63/gemini-web2api-go';
 const REPO_URL = 'https://github.com/' + REPO;
 const UPD_TTL_MS = 6 * 3600 * 1000;
 let CURRENT_VERSION = '';
-let UPD_ERR = '';      // 最近一次检查失败的原因（只放内存）
+let UPD_ERR = '';
 let UPD_BUSY = false;
 
 async function ensureCurrentVersion() {
@@ -1871,7 +1790,6 @@ function updCacheRead() {
   try { return JSON.parse(localStorage.getItem('updCache') || 'null'); } catch (e) { return null; }
 }
 
-// 比较 "4.25.0" 这类版本号：a>b 返回正数。
 function verCmp(a, b) {
   const pa = String(a).replace(/^v/, '').split(/[.-]/).map(n => parseInt(n, 10) || 0);
   const pb = String(b).replace(/^v/, '').split(/[.-]/).map(n => parseInt(n, 10) || 0);
@@ -1882,7 +1800,6 @@ function verCmp(a, b) {
   return 0;
 }
 
-// force=true：手动点「检查更新」，无视缓存和自动检查开关。
 async function checkUpdate(force) {
   if (UPD_BUSY) return;
   await ensureCurrentVersion();
@@ -1908,31 +1825,21 @@ async function checkUpdate(force) {
     }
     UPD_BUSY = false;
     if (force) {
-      if (UPD_ERR) flash('检查失败，浏览器连不上 GitHub');
-      else flash(verCmp(c.tag, CURRENT_VERSION) > 0 ? '发现新版本' : '已是最新版本');
+      if (UPD_ERR) flash(t('检查失败，浏览器连不上 GitHub'));
+      else flash(verCmp(c.tag, CURRENT_VERSION) > 0 ? t('发现新版本') : t('已是最新版本'));
     }
   }
   renderUpdate();
 }
 
-async function copyText(s) {
-  try { await navigator.clipboard.writeText(s); }
-  catch (e) {
-    const ta = document.createElement('textarea');
-    ta.value = s; document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); ta.remove();
-  }
-  flash('已复制到剪贴板');
-}
-
-// 刷新顶栏的「有新版本」提示，以及「关于」页里的版本块（不在那页就只刷顶栏）。
 function renderUpdate() {
   const c = updCacheRead();
   const hasNew = !!(c && c.tag && CURRENT_VERSION && verCmp(c.tag, CURRENT_VERSION) > 0);
   const pill = document.getElementById('updPill');
   if (pill) {
     pill.style.display = hasNew ? '' : 'none';
-    document.getElementById('updPillVer').textContent = hasNew ? ' v' + c.tag : '';
+    const pillVer = document.getElementById('updPillVer');
+    if (pillVer) pillVer.textContent = hasNew ? ' v' + c.tag : '';
   }
 
   const latest = document.getElementById('updLatest');
@@ -2006,13 +1913,6 @@ async function triggerAutoUpdate() {
   }
 }
 
-// ── i18n（中 ⇄ 英）───────────────────────────────────────────────────────
-// 机制：一个 MutationObserver 盯 #app，内容一变就按整段文本节点/属性精确匹配
-// I18N_EN 词典替换成英文；切回中文时从 ZH_ORIG 里恢复原文。渲染逻辑一行不用改，
-// 只在最外面套一层翻译。插值文案（带数字/名字的）不精确匹配、保持中文，属可接受。
-
-
-
 // ── Theme (Dark Mode) Manager ─────────────────────────────────────────────
 let THEME = (() => {
   try {
@@ -2031,7 +1931,6 @@ function applyTheme(theme) {
   if (btn) {
     btn.innerHTML = renderHugeIcon(theme === 'dark' ? 'sun' : 'moon', 18);
   }
-  // Update Chart theme if present
   if (charts.req && currentPage === 'dashboard') {
     const range = document.getElementById('rangeSel')?.value || '24h';
     loadChart(range);
@@ -2115,7 +2014,6 @@ function t(s) {
   if (dict[k]) return dict[k];
   if (LANG === 'es' && I18N_DATA['en'] && I18N_DATA['en'][k]) return I18N_DATA['en'][k];
 
-  // Toast / status prefix pattern
   const toastMatch = k.match(/^([✓✗]\s*#\d+\s+)(.*)$/);
   if (toastMatch) {
     let rest = toastMatch[2];
@@ -2153,32 +2051,17 @@ function translateTree(root, lang = LANG) {
   const dict = I18N_DATA[lang] || {};
   const norm = s => String(s).trim().replace(/\s+/g, ' ');
 
-  // 1. Rich HTML blocks (paragraphs with <b>, <code>, <br>)
-  if (isTranslated) {
-    const htmlScope = root.querySelectorAll ? root.querySelectorAll('.lede, details.note .body, .ck-extra, .hint, .modal-desc, .desc') : [];
-    htmlScope.forEach(el => {
-      const k = norm(el.innerHTML);
-      const tr = dict[k] || (lang === 'es' && I18N_DATA['en'] ? I18N_DATA['en'][k] : null);
-      if (tr) {
-        if (!el.hasAttribute('data-zh-html')) el.setAttribute('data-zh-html', el.innerHTML);
-        el.innerHTML = tr;
-      }
-    });
-  } else {
-    const zhScope = root.querySelectorAll ? root.querySelectorAll('[data-zh-html]') : [];
-    zhScope.forEach(el => {
-      el.innerHTML = el.getAttribute('data-zh-html');
-      el.removeAttribute('data-zh-html');
-    });
-  }
-
-  // 2. Text nodes
+  // 1. Text nodes
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let n;
   while ((n = w.nextNode())) {
-    if (isTranslated && n.parentElement && n.parentElement.closest('[data-zh-html]')) continue;
     const raw = n.nodeValue;
-    const key = norm(raw);
+    let orig = ZH_ORIG.get(n);
+    if (!orig) {
+      orig = raw;
+      ZH_ORIG.set(n, orig);
+    }
+    const key = norm(orig);
     if (!key) continue;
     if (isTranslated) {
       let tr = dict[key] || (lang === 'es' && I18N_DATA['en'] ? I18N_DATA['en'][key] : null);
@@ -2194,25 +2077,28 @@ function translateTree(root, lang = LANG) {
         if (matched) tr = cur;
       }
       if (tr) {
-        if (!ZH_ORIG.has(n)) ZH_ORIG.set(n, raw);
-        const leading = raw.match(/^\s*/)[0];
-        const trailing = raw.match(/\s*$/)[0];
+        const leading = orig.match(/^\s*/)[0];
+        const trailing = orig.match(/\s*$/)[0];
         n.nodeValue = leading + tr + trailing;
       }
-    } else if (ZH_ORIG.has(n)) {
-      n.nodeValue = ZH_ORIG.get(n);
-      ZH_ORIG.delete(n);
+    } else {
+      n.nodeValue = orig;
     }
   }
 
-  // 2. Element attributes (title, placeholder, aria-label)
+  // 2. Element attributes
   const scope = root.querySelectorAll ? root.querySelectorAll('[title],[placeholder],[aria-label]') : [];
   scope.forEach(el => {
     I18N_ATTRS.forEach(attr => {
       if (!el.hasAttribute(attr)) return;
       const dz = 'data-zh-' + attr;
+      let orig = el.getAttribute(dz);
+      if (!orig) {
+        orig = el.getAttribute(attr);
+        el.setAttribute(dz, orig);
+      }
       if (isTranslated) {
-        const val = norm(el.getAttribute(attr));
+        const val = norm(orig);
         let tr = dict[val] || (lang === 'es' && I18N_DATA['en'] ? I18N_DATA['en'][val] : null);
         if (!tr) {
           let cur = val;
@@ -2225,13 +2111,9 @@ function translateTree(root, lang = LANG) {
           }
           if (matched) tr = cur;
         }
-        if (tr && !el.hasAttribute(dz)) {
-          el.setAttribute(dz, el.getAttribute(attr));
-          el.setAttribute(attr, tr);
-        }
-      } else if (el.hasAttribute(dz)) {
-        el.setAttribute(attr, el.getAttribute(dz));
-        el.removeAttribute(dz);
+        if (tr) el.setAttribute(attr, tr);
+      } else {
+        el.setAttribute(attr, orig);
       }
     });
   });
@@ -2277,12 +2159,9 @@ async function toggleLang() {
   LANG = LANG === 'zh' ? 'en' : (LANG === 'en' ? 'es' : 'zh');
   try { localStorage.setItem('lang', LANG); } catch (e) {}
   await loadLocale(LANG);
-  i18nApply();
   updateLangBtn();
-  if (currentPage === 'dashboard') {
-    const range = document.getElementById('rangeSel')?.value || '24h';
-    loadChart(range);
-  }
+  renderShell();
+  if (currentPage) switchPage(currentPage, true);
 }
 
 // ── Application Boot ───────────────────────────────────────────────────────
