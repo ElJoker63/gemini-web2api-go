@@ -29,7 +29,7 @@ const pages = {
       <div class="kpi-row">
         <div class="kpi"><div class="label">24 小时请求</div><div class="value">${fmt.num(stats.total_requests)}</div></div>
         <div class="kpi"><div class="label">成功率</div><div class="value">${fmt.pct(stats.success_rate)}</div>
-          <div class="sub">${fmt.num(stats.success)} 成功 · ${fmt.num(stats.failures)} 失败</div></div>
+          <div class="sub">${fmt.num(stats.success)} ${t('成功')} · ${fmt.num(stats.failures)} ${t('失败')}</div></div>
         <div class="kpi"><div class="label">平均延迟</div><div class="value">${fmt.ms(stats.avg_ms)}</div></div>
         <div class="kpi"><div class="label">输入 Token</div><div class="value">${fmt.num(stats.prompt_tokens)}</div></div>
         <div class="kpi"><div class="label">输出 Token</div><div class="value">${fmt.num(stats.output_tokens)}</div></div>
@@ -61,10 +61,10 @@ const pages = {
               const pct = Math.min(rph / BAN_LINE * 100, 100);
               const limitPct = limit ? Math.min(limit / BAN_LINE * 100, 100) : null;
               const left = Math.max(BAN_LINE - rph, 0);
-              let noteCls = '', note = `还能再打约 ${left} 次`;
-              if (rph >= BAN_LINE) { noteCls = 'danger'; note = '已越过红线，随时可能被拦'; }
-              else if (rph >= BAN_LINE * 0.75) { noteCls = 'warn'; note = `接近红线，只剩约 ${left} 次`; }
-              else if (rph === 0) { note = '本小时还没有请求'; }
+              let noteCls = '', note = LANG === 'es' ? 'Quedan aprox. ' + left + ' peticiones' : (LANG === 'en' ? 'Can make ~' + left + ' more requests' : '还能再打约 ' + left + ' 次');
+              if (rph >= BAN_LINE) { noteCls = 'danger'; note = t('已越过红线，随时可能被拦'); }
+              else if (rph >= BAN_LINE * 0.75) { noteCls = 'warn'; note = LANG === 'es' ? 'Cerca del límite, solo quedan aprox. ' + left : (LANG === 'en' ? 'Near ban line, only ~' + left + ' left' : '接近红线，只剩约 ' + left + ' 次'); }
+              else if (rph === 0) { note = t('本小时还没有请求'); }
               return `<div class="slot">
                 <div class="slot-head">
                   <span class="slot-name">${escapeHtml(t(u.name))}</span>
@@ -73,9 +73,9 @@ const pages = {
                 <div class="track">
                   <div class="fill" style="width:${pct}%"></div>
                   ${limitPct !== null ? `<div class="redline" style="left:${limitPct}%"
-                    title="本地 RPH 限额 ${limit}"></div>` : ''}
+                    title="${LANG === 'es' ? 'Límite local RPH ' + limit : (LANG === 'en' ? 'Local RPH limit ' + limit : '本地 RPH 限额 ' + limit)}"></div>` : ''}
                 </div>
-                <div class="slot-note ${noteCls}">${note} · 并发 ${u.inflight}/${u.limit_concurrent || '∞'}
+                <div class="slot-note ${noteCls}">${note} · ${(LANG === 'es' ? 'Concurrencia ' : (LANG === 'en' ? 'Inflight ' : '并发 '))}${u.inflight}/${u.limit_concurrent || '∞'}
                   · RPM ${u.rpm}/${u.limit_rpm || '∞'} · RPH ${rph}/${u.limit_rph || '∞'}</div>
               </div>`;
             }).join('') || '<div class="empty">还没有任何请求经过</div>'}
@@ -243,7 +243,7 @@ const pages = {
                 <td class="pre truncate" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</td>
                 <td class="nw">${
                   p.state === 'disabled' ? '<span class="badge muted">已禁用</span>'
-                  : p.state === 'cooling' ? `<span class="badge fail" title="连续失败 ${p.fail_count} 次，熔断冷却中">冷却 ${p.cooldown_remaining_sec || 0}s</span>`
+                  : p.state === 'cooling' ? `<span class="badge fail" title="${LANG === 'es' ? 'Falló ' + p.fail_count + ' veces consecutivas, enfriamiento del disyuntor activo' : (LANG === 'en' ? 'Failed ' + p.fail_count + ' consecutive times, circuit breaker cooling' : '连续失败 ' + p.fail_count + ' 次，熔断冷却中')}">${LANG === 'es' ? 'Enfriamiento ' + (p.cooldown_remaining_sec || 0) + 's' : (LANG === 'en' ? 'Cooldown ' + (p.cooldown_remaining_sec || 0) + 's' : '冷却 ' + (p.cooldown_remaining_sec || 0) + 's')}</span>`
                   : '<span class="badge ok">已启用</span>'
                 }</td>
                 <td class="nw">${p.exclusive_account_id
@@ -275,7 +275,7 @@ const pages = {
         <h2>Cookie 池
           <span class="controls">
             ${deadN > 0 ? '<span class="badge fail" style="margin-right:8px" title="' + t('这些号鉴权在失败，多半 cookie 过期了，建议用 Firefox 重新导出') + '">' + deadN + ' ' + t('疑似失效') + '</span>' : ''}
-            <span class="badge ${data.enabled > 0 ? 'ok' : 'muted'}" style="margin-right:8px">${LANG === 'en' ? (data.enabled || 0) + ' active / ' + (data.total || 0) + ' total' : (data.enabled || 0) + ' 启用 / ' + (data.total || 0) + ' 共'}</span>
+            <span class="badge ${data.enabled > 0 ? 'ok' : 'muted'}" style="margin-right:8px">${LANG === 'es' ? (data.enabled || 0) + ' activas / ' + (data.total || 0) + ' total' : (LANG === 'en' ? (data.enabled || 0) + ' active / ' + (data.total || 0) + ' total' : (data.enabled || 0) + ' 启用 / ' + (data.total || 0) + ' 共')}</span>
             <button class="btn" onclick="addCookieAcct()">+ 导入 Cookie</button>
           </span>
         </h2>
@@ -308,7 +308,7 @@ const pages = {
             <tbody>${items.map(a => `
               <tr class="${a.health === 'dead' ? 'row-dead' : ''}">
                 <td class="num nw">${a.id}</td>
-                <td class="truncate" title="${escapeHtml(a.label || '')}">${a.label ? escapeHtml(a.label) : '<span class="badge muted">未命名</span>'}${a.authuser > 0 ? ` <span class="badge muted" title="${LANG === 'en' ? 'Account index: requests go to /u/' + a.authuser + '/' : '账号序号：请求走 /u/' + a.authuser + '/'}">/u/${a.authuser}</span>` : ''}</td>
+                <td class="truncate" title="${escapeHtml(a.label || '')}">${a.label ? escapeHtml(a.label) : '<span class="badge muted">未命名</span>'}${a.authuser > 0 ? ` <span class="badge muted" title="${LANG === 'es' ? 'Índice de cuenta: solicitudes van a /u/' + a.authuser + '/' : (LANG === 'en' ? 'Account index: requests go to /u/' + a.authuser + '/' : '账号序号：请求走 /u/' + a.authuser + '/')}">/u/${a.authuser}</span>` : ''}</td>
                 <td class="nw">${
                   a.health === 'dead' ? '<span class="badge fail" title="鉴权在失败，多半 cookie 过期了，建议用 Firefox 重新导出">疑似失效</span>'
                   : a.health === 'disabled' ? '<span class="badge muted">禁用</span>'
@@ -324,7 +324,7 @@ const pages = {
                     ? `<span class="badge fail" title="${escapeHtml(t(a.unavailable_reason || 'IP 冷却中，Cookie 暂不可用'))}">${t('IP 冷却中')}${a.proxy_retry_after ? ' ' + a.proxy_retry_after + 's' : ''}</span>`
                     : '<span class="badge ok">可用</span>'
                 }</td>
-                <td class="nw" title="${LANG === 'en' ? 'Total ' + a.cookie_count + ' cookies, key items: ' + (a.key_cookies||[]).join(' / ') : '共 ' + a.cookie_count + ' 个 cookie，关键项：' + (a.key_cookies||[]).join(' / ')}">
+                <td class="nw" title="${LANG === 'es' ? 'Total ' + a.cookie_count + ' cookies, cookies clave: ' + (a.key_cookies||[]).join(' / ') : (LANG === 'en' ? 'Total ' + a.cookie_count + ' cookies, key items: ' + (a.key_cookies||[]).join(' / ') : '共 ' + a.cookie_count + ' 个 cookie，关键项：' + (a.key_cookies||[]).join(' / '))}">
                   <span class="badge ${a.has_1psidts ? 'ok' : 'warn'}">${(a.key_cookies||[]).length}/9 项</span>
                   ${a.has_1psidts ? '' : '<span class="badge warn" title="缺 __Secure-1PSIDTS，首次保活会尝试补发；失败请用 Firefox 重新导出">缺 TS</span>'}
                 </td>
@@ -360,10 +360,11 @@ const pages = {
       return a ? (a.label || ('#' + a.id)) : ('#' + id);
     };
     const allowCell = k => {
-      if (k.allow_all) return '<span class="badge ok">全部账号</span>';
-      if (!(k.account_ids || []).length) return '<span class="badge warn" title="' + t('没有勾选账号，这把 Key 只能走匿名能力（登录态模型不可用）') + '">仅匿名</span>';
+      if (k.allow_all) return '<span class="badge ok">' + t('全部账号') + '</span>';
+      if (!(k.account_ids || []).length) return '<span class="badge warn" title="' + t('没有勾选账号，这把 Key 只能走匿名能力（登录态模型不可用）') + '">' + t('仅匿名') + '</span>';
+      const acctWord = LANG === 'es' ? 'cuentas' : (LANG === 'en' ? 'accounts' : '个账号');
       return '<span class="badge muted" title="' + escapeHtml((k.account_ids || []).map(acctLabel).join(', ')) + '">' +
-        (k.account_ids || []).length + ' 个账号</span>';
+        (k.account_ids || []).length + ' ' + acctWord + '</span>';
     };
     return `
       <div class="panel page-fill">
@@ -639,23 +640,23 @@ async function loadReqs() {
   const from = total ? reqOffset + 1 : 0;
   const to = Math.min(reqOffset + size, total);
   document.getElementById('reqPager').innerHTML = `
-    <span class="muted">${from}-${to} / ${LANG === 'en' ? 'total ' + total + ' items' : '共 ' + total + ' 条'}</span>
+    <span class="muted">${from}-${to} / ${LANG === 'es' ? 'total ' + total + ' registros' : (LANG === 'en' ? 'total ' + total + ' items' : '共 ' + total + ' 条')}</span>
     <span class="pager-btns">
       <button class="btn muted" ${reqOffset === 0 ? 'disabled' : ''}
         onclick="reqOffset=0;loadReqs()">${t('最前')}</button>
       <button class="btn muted" ${reqOffset === 0 ? 'disabled' : ''}
         onclick="reqOffset=Math.max(0,reqOffset-${size});loadReqs()">${t('上一页')}</button>
-      <span class="muted" style="min-width:80px;text-align:center">${LANG === 'en' ? 'Page ' + page + ' / ' + pages : '第 ' + page + ' / ' + pages + ' 页'}</span>
+      <span class="muted" style="min-width:80px;text-align:center">${LANG === 'es' ? 'Pág. ' + page + ' / ' + pages : (LANG === 'en' ? 'Page ' + page + ' / ' + pages : '第 ' + page + ' / ' + pages + ' 页')}</span>
       <button class="btn muted" ${to >= total ? 'disabled' : ''}
         onclick="reqOffset+=${size};loadReqs()">${t('下一页')}</button>
       <button class="btn muted" ${to >= total ? 'disabled' : ''}
         onclick="reqOffset=${(pages-1)*size};loadReqs()">${t('最后')}</button>
     </span>
   `;
-  if (LANG === 'en') {
-    translateTree(tbody, true);
+  if (LANG !== 'zh') {
+    translateTree(tbody, LANG);
     const pager = document.getElementById('reqPager');
-    if (pager) translateTree(pager, true);
+    if (pager) translateTree(pager, LANG);
   }
   // populate model dropdown from current page (best-effort)
   const sel = document.getElementById('reqModel');
@@ -809,14 +810,19 @@ async function loadRtCfg() {
   document.querySelector('#deployTable tbody').innerHTML = [
     ['监听', `${escapeHtml(d.host || '')}:${d.port}`, 'compose 的 ports + --port'],
     ['数据库', escapeHtml(d.db_path || ''), 'compose 的 volumes + --db'],
-    ['Cookie 播种文件', d.cookie_file ? escapeHtml(d.cookie_file) : '<span class="badge muted">未配置</span>',
+    ['Cookie 播种文件', d.cookie_file ? escapeHtml(d.cookie_file) : '<span class="badge muted">' + t('未配置') + '</span>',
      '启动时把文件内容导入 Cookie 池；之后从「Cookie 池」页面管理'],
-    ['面板鉴权', d.admin_auth ? '<span class="badge ok">已开启</span>'
-                             : '<span class="badge fail">未设 token</span>', 'compose 的 ADMIN_TOKEN'],
-    ['API Key', d.api_key_locked ? '<span class="badge">部署锁定</span>'
-                                 : '<span class="badge ok">面板可轮换</span>', 'compose 的 API_KEY'],
-  ].map(r => `<tr><td title="${escapeHtml(r[2])}">${r[0]}</td>
+    ['面板鉴权', d.admin_auth ? '<span class="badge ok">' + t('已开启') + '</span>'
+                             : '<span class="badge fail">' + t('未设 token') + '</span>', 'compose 的 ADMIN_TOKEN'],
+    ['API Key', d.api_key_locked ? '<span class="badge">' + t('部署锁定') + '</span>'
+                                 : '<span class="badge ok">' + t('面板可轮换') + '</span>', 'compose 的 API_KEY'],
+  ].map(r => `<tr><td title="${escapeHtml(t(r[2]))}">${t(r[0])}</td>
       <td class="pre" style="word-break:break-all;">${r[1]}</td></tr>`).join('');
+
+  if (LANG !== 'zh') {
+    translateTree(document.getElementById('rtCfgForm'), LANG);
+    translateTree(document.querySelector('#deployTable tbody'), LANG);
+  }
 }
 
 async function saveRtCfg() {
@@ -908,7 +914,7 @@ async function addProxy() {
 async function delProxy(id) {
   const ok = await modalConfirm({
     title: '删除代理',
-    desc: `确定删除代理 #${id}？此操作不可撤销。被 Cookie 独占绑定的代理需要先解绑。`,
+    desc: LANG === 'es' ? `¿Estás seguro de eliminar el proxy #${id}? Esta acción no se puede deshacer. Los proxys reservados por una cookie deben desvincularse primero.` : (LANG === 'en' ? `Delete proxy #${id}? This cannot be undone. Proxies exclusively bound to a Cookie must be unbound first.` : `确定删除代理 #${id}？此操作不可撤销。被 Cookie 独占绑定的代理需要先解绑。`),
     confirmText: '删除',
     danger: true,
   });
@@ -1033,9 +1039,11 @@ async function addCookieAcct() {
         inputs().forEach(el => { el.value = obj[el.dataset.ck] || ''; });
         const n = Object.keys(extras).length;
         $('[data-role=extras]').textContent = n
-          ? (LANG === 'en'
-              ? `${n} additional item${n > 1 ? 's' : ''} not listed above (${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}) will be kept.`
-              : `另有 ${n} 项未在上面列出（${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}），会一并保留。`)
+          ? (LANG === 'es'
+              ? `${n} elemento${n > 1 ? 's' : ''} adicional${n > 1 ? 'es' : ''} no listado${n > 1 ? 's' : ''} arriba (${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}) se conservarán.`
+              : (LANG === 'en'
+                  ? `${n} additional item${n > 1 ? 's' : ''} not listed above (${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}) will be kept.`
+                  : `另有 ${n} 项未在上面列出（${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}），会一并保留。`))
           : '';
       };
 
@@ -1047,7 +1055,7 @@ async function addCookieAcct() {
             .forEach(b => b.classList.toggle('on', b === btn));
           $('[data-pane=fields]').style.display = mode === 'fields' ? '' : 'none';
           $('[data-pane=raw]').style.display = mode === 'raw' ? '' : 'none';
-          if (LANG === 'en') translateTree(overlay, true);
+          if (LANG !== 'zh') translateTree(overlay, LANG);
         };
       });
       // 在逐项模式里直接粘贴一整串时自动拆开，省得用户先去切 tab
@@ -1088,7 +1096,7 @@ async function addCookieAcct() {
   });
   const j = await r.json();
   if (j.error) return flash('导入失败：' + j.error);
-  flash('Cookie 已导入 #' + j.id);
+  flash(LANG === 'es' ? 'Cookie #' + j.id + ' importada' : (LANG === 'en' ? 'Cookie #' + j.id + ' imported' : 'Cookie 已导入 #' + j.id));
   await refreshPage();
 }
 
@@ -1105,18 +1113,18 @@ async function editCookieAcct(id, label, note, authuser, proxyID, proxyExclusive
   try { proxies = (await api('api/proxies')).items || []; } catch (e) {}
   const proxyOptions = proxies.map(p => {
     const state = p.state === 'cooling'
-      ? (LANG === 'en' ? ' · IP cooling' : ' · IP 冷却中')
+      ? (LANG === 'es' ? ' · IP en enfriamiento' : (LANG === 'en' ? ' · IP cooling' : ' · IP 冷却中'))
       : p.state === 'disabled'
-        ? (LANG === 'en' ? ' · disabled' : ' · 已禁用')
+        ? (LANG === 'es' ? ' · deshabilitado' : (LANG === 'en' ? ' · disabled' : ' · 已禁用'))
         : '';
     const owner = p.exclusive_account_id && p.exclusive_account_id !== id
-      ? (LANG === 'en' ? ` · owned by #${p.exclusive_account_id}` : ` · 已被 #${p.exclusive_account_id} 独占`)
+      ? (LANG === 'es' ? ` · reservado por #${p.exclusive_account_id}` : (LANG === 'en' ? ` · owned by #${p.exclusive_account_id}` : ` · 已被 #${p.exclusive_account_id} 独占`))
       : '';
     return `<option value="${p.id}" ${p.id === proxyID ? 'selected' : ''}>${escapeHtml(p.name || ('#' + p.id))} — ${escapeHtml(p.url)}${state}${owner}</option>`;
   }).join('');
 
   const ok = await buildModal({
-    title: '编辑 Cookie #' + id,
+    title: LANG === 'es' ? 'Editar Cookie #' + id : (LANG === 'en' ? 'Edit Cookie #' + id : '编辑 Cookie #' + id),
     wide: true,
     desc: '改标签、备注、账号序号和出口绑定。要换 cookie 请删掉重新导入。',
     bodyHTML: `
@@ -1230,7 +1238,7 @@ async function toggleCookieAcct(id) {
 async function delCookieAcct(id) {
   const ok = await modalConfirm({
     title: '删除 Cookie',
-    desc: `确定删除账号 #${id}？此操作不可撤销，删除后请求不再用它。`,
+    desc: LANG === 'es' ? `¿Estás seguro de eliminar la cuenta #${id}? Esta acción no se puede deshacer y las solicitudes ya no la usarán.` : (LANG === 'en' ? `Delete account #${id}? This cannot be undone; requests will no longer use it.` : `确定删除账号 #${id}？此操作不可撤销，删除后请求不再用它。`),
     confirmText: '删除', danger: true,
   });
   if (!ok) return;
@@ -1300,7 +1308,7 @@ async function runTest() {
           <div class="pre" style="max-height: 120px; overflow: auto; background: var(--bg); padding: 8px; border-radius: 4px;">${escapeHtml(r.upstream_snip)}</div>` : ''}
       </div>
     `;
-    if (LANG === 'en') translateTree(box, true);
+    if (LANG !== 'zh') translateTree(box, LANG);
   } catch (e) {
     box.innerHTML = `<div class="err">${t('测试请求失败：' + e.message)}</div>`;
   }
@@ -1358,11 +1366,11 @@ function keyAccountListHTML(selected) {
     <label class="row" style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;cursor:pointer;">
       <input type="checkbox" data-account="${a.id}" ${sel.has(a.id) ? 'checked' : ''} />
       <span>${escapeHtml(a.label || ('#' + a.id))}</span>
-      <span class="badge ${a.status === 'enabled' ? 'ok' : 'muted'}">${a.status === 'enabled' ? '启用' : '停用'}</span>
-      ${a.proxy_id ? `<span class="badge ${a.proxy_exclusive ? 'warn' : 'muted'}">${escapeHtml(a.proxy_name || ('#' + a.proxy_id))}${a.proxy_exclusive ? ' · 独占' : ''}</span>` : ''}
-      ${a.available === false ? '<span class="badge fail">IP 不可用</span>' : ''}
+      <span class="badge ${a.status === 'enabled' ? 'ok' : 'muted'}">${a.status === 'enabled' ? t('启用') : t('停用')}</span>
+      ${a.proxy_id ? `<span class="badge ${a.proxy_exclusive ? 'warn' : 'muted'}">${escapeHtml(a.proxy_name || ('#' + a.proxy_id))}${a.proxy_exclusive ? ' · ' + t('独占') : ''}</span>` : ''}
+      ${a.available === false ? '<span class="badge fail">' + t('IP 不可用') + '</span>' : ''}
     </label>`).join('');
-  return rows || '<div class="empty">Cookie 池是空的</div>';
+  return rows || '<div class="empty">' + t('Cookie 池是空的') + '</div>';
 }
 
 function keyModalSync(overlay) {
@@ -1437,7 +1445,7 @@ async function editKey(id) {
     try { keysAccountsCache = (await api('api/cookies')).items || []; } catch (e) {}
   }
   const data = await buildModal({
-    title: '编辑 API Key #' + id, wide: true,
+    title: LANG === 'es' ? 'Editar API Key #' + id : (LANG === 'en' ? 'Edit API Key #' + id : '编辑 API Key #' + id), wide: true,
     desc: '改名称、启用状态和可用账号。要换 Key 值用下面的「自定义 Key」或列表里的「轮换」。',
     bodyHTML: `
       <div class="field"><label>名称</label>
@@ -1510,7 +1518,7 @@ async function toggleKey(id) {
 async function delKey(id) {
   const ok = await modalConfirm({
     title: '删除 API Key',
-    desc: `确定删除 Key #${id}？使用它的客户端会立即失去访问权限，此操作不可撤销。`,
+    desc: LANG === 'es' ? `¿Estás seguro de eliminar la Key #${id}? Los clientes que la usen perderán el acceso de inmediato, esta acción no se puede deshacer.` : (LANG === 'en' ? `Delete Key #${id}? Clients using it will immediately lose access. This cannot be undone.` : `确定删除 Key #${id}？使用它的客户端会立即失去访问权限，此操作不可撤销。`),
     confirmText: '删除', danger: true,
   });
   if (!ok) return;
@@ -1554,10 +1562,10 @@ function buildModal({ title, desc, bodyHTML, submitText, danger, wide, allowEnte
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    if (LANG === 'en') translateTree(overlay, true);
     // 弹窗挂上 DOM 之后再交给调用方接事件——内容是 innerHTML 灌进去的，
     // 早于这一步拿不到里面的节点。
     if (onReady) onReady(overlay);
+    if (LANG !== 'zh') translateTree(overlay, LANG);
 
     const finish = (val) => {
       overlay.remove();
@@ -1637,8 +1645,8 @@ function modalForm({ title, desc, fields, submitText = '提交' }) {
       for (const f of fields) {
         const el = overlay.querySelector(`[data-name="${f.name}"]`);
         const v = (el.value || '').trim();
-        if (f.required && !v) return { error: `「${f.label}」不能为空` };
-        if (f.minLength && v.length < f.minLength) return { error: `「${f.label}」至少 ${f.minLength} 字符` };
+        if (f.required && !v) return { error: LANG === 'es' ? `"${t(f.label)}" es requerido` : (LANG === 'en' ? `"${t(f.label)}" is required` : `「${f.label}」不能为空`) };
+        if (f.minLength && v.length < f.minLength) return { error: LANG === 'es' ? `"${t(f.label)}" debe tener al menos ${f.minLength} caracteres` : (LANG === 'en' ? `"${t(f.label)}" must be at least ${f.minLength} characters` : `「${f.label}」至少 ${f.minLength} 字符`) };
         out[f.name] = v;
       }
       return out;
@@ -1664,7 +1672,7 @@ async function switchPage(name, force = false) {
   document.querySelectorAll('nav button').forEach(b =>
     b.classList.toggle('active', b.dataset.page === name));
   const titleEl = document.getElementById('pageTitle');
-  if (titleEl) titleEl.textContent = PAGE_TITLES[name] || name;
+  if (titleEl) titleEl.textContent = t(PAGE_TITLES[name] || name);
   const main = document.getElementById('main');
 
   // 旧内容先留着，超过 200ms 还没好才显示占位——快的时候完全不闪
@@ -1682,6 +1690,7 @@ async function switchPage(name, force = false) {
   clearTimeout(slow);
   if (seq !== pageSeq) return;   // 期间又点了别的页，丢弃这次结果
   main.innerHTML = html;
+  if (LANG !== 'zh') translateTree(main, LANG);
   if (name === 'about') renderUpdate();
 
   if (name === 'dashboard') {
@@ -1731,24 +1740,24 @@ function renderShell() {
   document.getElementById('app').innerHTML = `
     <aside class="sidebar${collapsed ? ' collapsed' : ''}">
       <div class="side-top">
-        <button class="icon-btn" onclick="toggleSidebar()" title="收起 / 展开" aria-label="收起或展开侧边栏">
+        <button class="icon-btn" onclick="toggleSidebar()" title="${t('收起 / 展开')}" aria-label="${t('收起或展开侧边栏')}">
           ${renderHugeIcon('menu', 20)}
         </button>
         <span class="brand-text"><span class="spark"></span>gemini-web2api</span>
       </div>
       <nav>
         ${NAV.map(([k, label]) => `
-          <button data-page="${k}" onclick="switchPage('${k}')" title="${label}">
+          <button data-page="${k}" onclick="switchPage('${k}')" title="${t(label)}">
             ${renderHugeIcon(k, 20)}
-            <span class="nav-label">${label}</span>
+            <span class="nav-label">${t(label)}</span>
           </button>`).join('')}
       </nav>
       <div class="side-foot">
         <div id="sideStat"></div>
         <div class="sf-sep"></div>
-        <button class="logout-btn" onclick="doLogout()" title="退出登录">
+        <button class="logout-btn" onclick="doLogout()" title="${t('退出登录')}">
           ${renderHugeIcon('logout', 18)}
-          <span class="nav-label">退出登录</span>
+          <span class="nav-label">${t('退出登录')}</span>
         </button>
       </div>
     </aside>
@@ -1757,18 +1766,18 @@ function renderShell() {
         <h1 class="page-title" id="pageTitle">概览</h1>
         <div class="topbar-right">
           <button class="upd-pill" id="updPill" style="display:none" onclick="switchPage('about')"
-                  title="查看更新"><span>有新版本</span><b id="updPillVer"></b></button>
+                  title="${t('查看更新')}"><span>${t('有新版本')}</span><b id="updPillVer"></b></button>
           <button class="icon-btn" id="themeBtn" onclick="toggleTheme()"
-                  title="切换主题 / Toggle theme" aria-label="Toggle theme">
+                  title="${t('切换主题 / Toggle theme')}" aria-label="Toggle theme">
             ${renderHugeIcon(THEME === 'dark' ? 'sun' : 'moon', 18)}
           </button>
           <a class="icon-btn" href="${REPO_URL}" target="_blank" rel="noopener"
-             title="GitHub 仓库" aria-label="GitHub">
+             title="${t('GitHub 仓库')}" aria-label="GitHub">
             ${renderHugeIcon('github', 18)}
           </a>
           <button class="btn" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="切换语言 / Switch language">EN</button>
           <span class="dot" id="healthDot"></span>
-          <span class="muted" id="healthText">运行中</span>
+          <span class="muted" id="healthText">${t('运行中')}</span>
         </div>
       </div>
       <main id="main"></main>
@@ -1795,9 +1804,9 @@ async function loadSideStat() {
     if (ht) ht.textContent = t(root ? '运行中' : '无法连接');
     box.innerHTML = [
       ['版本', root ? 'v' + root.version : '—'],
-      ['模型', root ? root.models.length + (LANG === 'en' ? ' models' : ' 个') : '—'],
-      ['Cookie', ck && ck.items && ck.items.length ? ck.items.length + (LANG === 'en' ? ' accounts' : ' 个') : t('匿名')],
-      ['IP slot', usage ? (usage.items || []).length + (LANG === 'en' ? ' slots' : ' 个') : '—'],
+      ['模型', root ? root.models.length + (LANG === 'es' ? ' modelos' : (LANG === 'en' ? ' models' : ' 个')) : '—'],
+      ['Cookie', ck && ck.items && ck.items.length ? ck.items.length + (LANG === 'es' ? ' cuentas' : (LANG === 'en' ? ' accounts' : ' 个')) : t('匿名')],
+      ['IP slot', usage ? (usage.items || []).length + (LANG === 'es' ? ' slots' : (LANG === 'en' ? ' slots' : ' 个')) : '—'],
     ].map(([k, v]) => `<div class="sf-row"><span>${t(k)}</span><b>${v}</b></div>`).join('');
   } catch (e) { box.innerHTML = ''; }
 }
@@ -1809,10 +1818,11 @@ function renderLogin() {
         border-radius:4px;display:inline-block;
         clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%)"></span>
         gemini-web2api</h1>
-      <input id="tokenInput" type="password" placeholder="管理员 Token" />
-      <button class="btn" onclick="doLogin()">登录</button>
+      <input id="tokenInput" type="password" placeholder="${t('管理员 Token')}" />
+      <button class="btn" onclick="doLogin()">${t('登录')}</button>
       <div id="loginErr" class="err"></div>
     </div>`;
+  if (LANG !== 'zh') translateTree(document.getElementById('app'), LANG);
   document.getElementById('tokenInput').focus();
   document.getElementById('tokenInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
@@ -1950,47 +1960,48 @@ function renderUpdate() {
   const sums = (c.assets || []).find(a => /SHA256SUMS/i.test(a.name));
   box.innerHTML = `
     <div class="upd-new">
-      <h3><span>发现新版本</span> v${escapeHtml(c.tag)}</h3>
+      <h3><span>${t('发现新版本')}</span> v${escapeHtml(c.tag)}</h3>
       <div class="muted" style="font-size:12px;">${c.published ? new Date(c.published).toLocaleDateString() : ''}</div>
       <details class="note" open style="margin-top:8px;">
-        <summary>更新内容</summary>
+        <summary>${t('更新内容')}</summary>
         <div class="pre upd-notes">${escapeHtml(c.body)}</div>
       </details>
-      <div class="label">Docker 部署</div>
+      <div class="label">${t('Docker 部署')}</div>
       <div class="row cmd-row">
         <code>${escapeHtml(dockerCmd)}</code>
-        <button class="btn muted" onclick="copyText(${escapeHtml(JSON.stringify(dockerCmd))})">复制</button>
+        <button class="btn muted" onclick="copyText(${escapeHtml(JSON.stringify(dockerCmd))})">${t('复制')}</button>
       </div>
-      <div class="label">二进制部署</div>
-      <p class="hint" style="margin-bottom:6px;">下载对应平台的文件，替换旧的二进制后重启即可；数据在 data/ 目录，不受影响。</p>
+      <div class="label">${t('二进制部署')}</div>
+      <p class="hint" style="margin-bottom:6px;">${t('下载对应平台的文件，替换旧的二进制后重启即可；数据在 data/ 目录，不受影响。')}</p>
       <ul class="asset-list">
         ${bins.map(a => `<li><a class="link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">${escapeHtml(a.name)}</a></li>`).join('')}
-        ${sums ? `<li><a class="link" href="${escapeHtml(sums.url)}" target="_blank" rel="noopener">${escapeHtml(sums.name)}</a> <span class="muted">· <span>校验和</span></span></li>` : ''}
+        ${sums ? `<li><a class="link" href="${escapeHtml(sums.url)}" target="_blank" rel="noopener">${escapeHtml(sums.name)}</a> <span class="muted">· <span>${t('校验和')}</span></span></li>` : ''}
       </ul>
       <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
-        <button id="btnAutoUpdate" class="btn primary" onclick="triggerAutoUpdate()">一键更新二进制</button>
-        <a class="btn" href="${escapeHtml(c.url || REPO_URL + '/releases')}" target="_blank" rel="noopener">在 GitHub 查看</a>
+        <button id="btnAutoUpdate" class="btn primary" onclick="triggerAutoUpdate()">${t('一键更新二进制')}</button>
+        <a class="btn" href="${escapeHtml(c.url || REPO_URL + '/releases')}" target="_blank" rel="noopener">${t('在 GitHub 查看')}</a>
       </div>
       <div id="updStatusMsg" style="margin-top:10px;"></div>
     </div>`;
+  if (LANG !== 'zh') translateTree(box, LANG);
 }
 
 async function triggerAutoUpdate() {
   const btn = document.getElementById('btnAutoUpdate');
   const msg = document.getElementById('updStatusMsg');
   if (btn) btn.disabled = true;
-  if (msg) msg.innerHTML = '<span class="muted">正在下载并替换二进制，请稍候…</span>';
+  if (msg) msg.innerHTML = '<span class="muted">' + t('正在下载并替换二进制，请稍候…') + '</span>';
   try {
     const res = await api('/admin/api/update', { method: 'POST' });
     if (res && res.status === 'ok') {
-      if (msg) msg.innerHTML = '<span class="badge ok">' + escapeHtml(res.message) + '</span>';
-      flash('更新成功！请重启服务。');
+      if (msg) msg.innerHTML = '<span class="badge ok">' + escapeHtml(t(res.message)) + '</span>';
+      flash(t('更新成功！请重启服务。'));
     } else {
       throw new Error((res && res.error) || 'Update failed');
     }
   } catch (err) {
-    if (msg) msg.innerHTML = '<span class="err">更新失败：' + escapeHtml(err.message || String(err)) + '</span>';
-    flash('更新失败');
+    if (msg) msg.innerHTML = '<span class="err">' + t('更新失败：') + escapeHtml(t(err.message || String(err))) + '</span>';
+    flash(t('更新失败'));
     if (btn) btn.disabled = false;
   }
 }
@@ -2062,6 +2073,11 @@ async function loadLocale(lang) {
 }
 
 const I18N_PATTERNS = [
+  [/^本地 RPH 限额\s*(\d+)$/, (m, p1) => (LANG === 'es' ? 'Límite local RPH ' : 'Local RPH limit ') + p1],
+  [/^连续失败\s*(\d+)\s*次，熔断冷却中$/, (m, p1) => (LANG === 'es' ? `Falló ${p1} veces consecutivas, enfriamiento activo` : `Failed ${p1} consecutive times, circuit breaker cooling`)],
+  [/^冷却\s*(\d+)s$/, (m, p1) => (LANG === 'es' ? `Enfriamiento ${p1}s` : `Cooldown ${p1}s`)],
+  [/^代理\s*#(\d+)$/, (m, p1) => (LANG === 'es' ? 'Proxy #' : 'Proxy #') + p1],
+  [/^Cookie\s*已导入\s*#(\d+)$/, (m, p1) => (LANG === 'es' ? `Cookie #${p1} importada` : `Cookie #${p1} imported`)],
   [/^upstream error:\s*(.*)$/i, (m, p1) => (LANG === 'es' ? 'Error de upstream: ' : 'Upstream error: ') + t(p1)],
   [/cookie\s*池里\s*(\d+)\s*个账号都不可用[（(]最后一个[：:](.*?)[）)]；到面板[「"']Cookie\s*池[」"']用[「"']检测[」"']按钮逐个排查，或打开\s*fallback_anon\s*降级匿名/g,
    (m, n, last) => LANG === 'es'
@@ -2130,13 +2146,33 @@ function t(s) {
   return matched ? cur : s;
 }
 
-function translateTree(root, lang) {
+function translateTree(root, lang = LANG) {
   if (!root) return;
+  if (typeof lang === 'boolean') lang = LANG;
   const isTranslated = lang === 'en' || lang === 'es';
   const dict = I18N_DATA[lang] || {};
   const norm = s => String(s).trim().replace(/\s+/g, ' ');
 
-  // 1. Text nodes
+  // 1. Rich HTML blocks (paragraphs with <b>, <code>, <br>)
+  if (isTranslated) {
+    const htmlScope = root.querySelectorAll ? root.querySelectorAll('.lede, details.note .body, .ck-extra, .hint, .modal-desc, .desc') : [];
+    htmlScope.forEach(el => {
+      const k = norm(el.innerHTML);
+      const tr = dict[k] || (lang === 'es' && I18N_DATA['en'] ? I18N_DATA['en'][k] : null);
+      if (tr) {
+        if (!el.hasAttribute('data-zh-html')) el.setAttribute('data-zh-html', el.innerHTML);
+        el.innerHTML = tr;
+      }
+    });
+  } else {
+    const zhScope = root.querySelectorAll ? root.querySelectorAll('[data-zh-html]') : [];
+    zhScope.forEach(el => {
+      el.innerHTML = el.getAttribute('data-zh-html');
+      el.removeAttribute('data-zh-html');
+    });
+  }
+
+  // 2. Text nodes
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let n;
   while ((n = w.nextNode())) {
