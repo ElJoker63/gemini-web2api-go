@@ -22,14 +22,14 @@ func TestResponsesConversationPromptFitsOversizedFreshAndContinuation(t *testing
 		{"role": "user", "content": "second"},
 	}
 	prompt := "this prompt is over the configured byte budget"
-	if responsesConversationPromptFits(messages, prompt) {
+	if responsesConversationPromptFits(messages, prompt, 0) {
 		t.Fatal("oversized fresh conversation should use the attachment fallback")
 	}
 
-	parent := convParentKey(messages)
+	parent := convParentKey(messages, 0)
 	convPut(parent, &convState{updated: time.Now()})
 	defer convDelete(parent)
-	if !responsesConversationPromptFits(messages, prompt) {
+	if !responsesConversationPromptFits(messages, prompt, 0) {
 		t.Fatal("oversized continuation should use the existing Gemini conversation")
 	}
 }

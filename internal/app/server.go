@@ -437,12 +437,12 @@ func usageOf(prompt, text string, res *StreamResult) map[string]int {
 // so it must respect the same byte limit as the normal path. Once a parent
 // conversation is known, callGeminiConv sends only the newest message and can
 // safely continue even when the reconstructed history is large.
-func responsesConversationPromptFits(messages []map[string]interface{}, prompt string) bool {
+func responsesConversationPromptFits(messages []map[string]interface{}, prompt string, keyID int64) bool {
 	budget := rtCfg().MaxPromptBytes
 	if budget <= 0 || len([]byte(prompt)) <= budget {
 		return true
 	}
-	return convGet(convParentKey(messages)) != nil
+	return convGet(convParentKey(messages, keyID)) != nil
 }
 
 // remainingText 返回最终文本里还没通过 onDelta 发出去的部分。
@@ -727,7 +727,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	var res *StreamResult
 	conversationRequested := rtCfg().MultiTurn || rtCfg().TemporaryChat || previousResponseID != ""
 	useConversation := conversationRequested && len(images) == 0 && modelCfg.Tool == 0 &&
-		responsesConversationPromptFits(messages, prompt)
+		responsesConversationPromptFits(messages, prompt, modelCfg.KeyID)
 	if conversationRequested && !useConversation && len(images) == 0 && modelCfg.Tool == 0 {
 		logf("[conv] prompt %d 字节超过上限 %d，首轮回退普通 Responses 路径（文本附件）", len([]byte(prompt)), rtCfg().MaxPromptBytes)
 	}
