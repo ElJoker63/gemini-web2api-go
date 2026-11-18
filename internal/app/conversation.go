@@ -536,8 +536,28 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		if tok, err := getXSRF(conv.cookie, conv.authuser, proxyURL); err == nil {
 			xsrf = tok
 		} else {
-			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID},
-				fmt.Errorf("取 XSRF 失败: %w", err)
+			if xsrfErrBlamesCookie(err) && conv.accountID > 0 {
+				if a := accountByID(conv.accountID); a != nil {
+					if _, _, rerr := rotateAccount(*a); rerr == nil {
+						if fresh := accountByID(conv.accountID); fresh != nil && fresh.Cookie != "" {
+							if tok2, err2 := getXSRF(fresh.Cookie, fresh.AuthUser, proxyURL); err2 == nil {
+								logf("[cookie] 账号 #%d 轮转后恢复可用", conv.accountID)
+								conv.cookie = fresh.Cookie
+								conv.sapisid = extractSAPISID(fresh.Cookie)
+								conv.authuser = fresh.AuthUser
+								xsrf = tok2
+							}
+						}
+					}
+				}
+				if xsrf == "" {
+					markCookieByStatus(conv.accountID, 401, err.Error())
+				}
+			}
+			if xsrf == "" {
+				return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID},
+					fmt.Errorf("取 XSRF 失败: %w", err)
+			}
 		}
 	}
 
@@ -824,6 +844,11 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 			}
 		}
 		res, err = streamGenerateConv(prompt, mc, conv, onDelta, onReasoning)
+		if err != nil && fresh && conv.accountID > 0 && (res == nil || (res.Emitted == "" && res.EmittedReasoning == "")) {
+			exclude[conv.accountID] = true
+			logf("[conv] 账号 #%d 首轮失败 (%v)，尝试换号重试...", conv.accountID, err)
+			continue
+		}
 		if !retryOnAnotherAccount(res, err, mc, exclude) || !fresh {
 			break
 		}
@@ -864,6 +889,11 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 				}
 			}
 			res, err = streamGenerateConv(prompt, mc, conv, onDelta, onReasoning)
+			if err != nil && conv.accountID > 0 && (res == nil || (res.Emitted == "" && res.EmittedReasoning == "")) {
+				exclude[conv.accountID] = true
+				logf("[conv] 降级账号 #%d 失败 (%v)，尝试换号重试...", conv.accountID, err)
+				continue
+			}
 			if !retryOnAnotherAccount(res, err, mc, exclude) {
 				break
 			}
