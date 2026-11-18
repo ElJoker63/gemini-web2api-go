@@ -419,6 +419,19 @@ func usageOf(prompt, text string, res *StreamResult) map[string]int {
 	return buildUsageWithReasoning(prompt, text, r, false)
 }
 
+// responsesConversationPromptFits reports whether the conversation path can
+// send this request as-is. Its first turn embeds the complete logical history,
+// so it must respect the same byte limit as the normal path. Once a parent
+// conversation is known, callGeminiConv sends only the newest message and can
+// safely continue even when the reconstructed history is large.
+func responsesConversationPromptFits(messages []map[string]interface{}, prompt string) bool {
+	budget := rtCfg().MaxPromptBytes
+	if budget <= 0 || len([]byte(prompt)) <= budget {
+		return true
+	}
+	return convGet(convParentKey(messages)) != nil
+}
+
 // remainingText 返回最终文本里还没通过 onDelta 发出去的部分。
 // 真流式下通常只剩末尾一点或为空；没走真流式时 Emitted 为空，返回全文。
 func remainingText(text string, res *StreamResult) string {
@@ -548,6 +561,14 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	previousResponseID := getStr(req, "previous_response_id")
+	// Claude Code often sends only the new input after previous_response_id.
+	// Rebuild the logical history before hashing it for conversation.go; a full
+	// history resend remains supported and is detected without duplication.
+	if previous := responseHistoryGet(previousResponseID); previous != nil {
+		messages = mergeResponseHistory(previous, messages)
 	}
 
 	toolsRaw, _ := req["tools"].([]interface{})
@@ -687,7 +708,13 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	var text string
 	var toolCalls []ToolCall
 	var res *StreamResult
-	if rtCfg().MultiTurn && len(images) == 0 && modelCfg.Tool == 0 {
+	conversationRequested := rtCfg().MultiTurn || rtCfg().TemporaryChat || previousResponseID != ""
+	useConversation := conversationRequested && len(images) == 0 && modelCfg.Tool == 0 &&
+		responsesConversationPromptFits(messages, prompt)
+	if conversationRequested && !useConversation && len(images) == 0 && modelCfg.Tool == 0 {
+		logf("[conv] prompt %d 字节超过上限 %d，首轮回退普通 Responses 路径（文本附件）", len([]byte(prompt)), rtCfg().MaxPromptBytes)
+	}
+	if useConversation {
 		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, nil)
 	} else {
 		text, toolCalls, res, err = callGemini(prompt, latest, modelCfg, tools, images, onDelta, nil)
@@ -767,6 +794,10 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordRequest("responses", modelName, prompt, text, res, 200, "", stream)
+	// Store every successful Responses turn. This lets a later previous_response_id
+	// reconstruct context even when an oversized first turn used the attachment
+	// fallback instead of the Gemini native conversation path.
+	responseHistoryPut(rid, messages, text, toolCalls)
 	if stream {
 		// 补上闸门扣住、或前缀 diff 跳过的尾巴，再发终态事件。
 		if rest := remainingOf(text, sentText(res, gate)); rest != "" {
