@@ -50,7 +50,8 @@ type RuntimeConfig struct {
 	MaxPromptBytes int `json:"max_prompt_bytes"`
 	// MultiTurn 开启后走 Gemini 原生 conversation_id 服务端多轮：按历史前缀识别续接，
 	// 命中就只发最新一句、历史留服务端，绕开单请求字节墙。匿名/登录都行，见 conversation.go。
-	// 默认 true，自动保持对话在同一条会话连续交互。
+	// 默认 false（保持现有"每轮拼全量 prompt"行为）。实测多轮不放大上下文窗口，只让长
+	// 对话不撞单请求墙——对 Codex 这类长会话有用，对"喂长文档"没用。
 	MultiTurn bool `json:"multi_turn"`
 	// 出完结果自动删掉 gemini.google.com 上的这条会话（#19）。只登录态生效。默认 false。
 	AutoDeleteConversation bool `json:"auto_delete_conversation"`

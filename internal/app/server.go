@@ -294,23 +294,6 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	cid := "chatcmpl-" + randHex(12)
 	created := time.Now().Unix()
 
-	convID := getStr(req, "conversation_id")
-	if convID == "" {
-		convID = getStr(req, "chat_id")
-	}
-	if convID == "" {
-		convID = getStr(req, "session_id")
-	}
-	if convID == "" {
-		convID = r.Header.Get("X-Conversation-Id")
-	}
-	if convID == "" {
-		convID = r.Header.Get("X-Session-Id")
-	}
-	if convID != "" {
-		w.Header().Set("X-Conversation-Id", convID)
-	}
-
 	// 带 tools 时正文过一道围栏闸门：```tool_call``` 块要完整文本才能解析，
 	// 直接转发会把围栏原文推给客户端，所以只放行确定不在围栏里的部分。
 	// 思考链跟围栏无关，两种情况都直接流。
@@ -334,10 +317,9 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	var text string
 	var toolCalls []ToolCall
 	var res *StreamResult
-	conversationRequested := rtCfg().MultiTurn || rtCfg().TemporaryChat || convID != ""
-	if conversationRequested && len(images) == 0 && modelCfg.Tool == 0 {
+	if rtCfg().MultiTurn && len(images) == 0 && modelCfg.Tool == 0 {
 		// 多轮：按历史前缀识别续接，命中就只发新消息、历史留服务端。带 tools 也走这条。
-		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning, convID)
+		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning)
 	} else {
 		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, onReasoning)
 	}
@@ -431,7 +413,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respData := map[string]interface{}{
+	writeJSON(w, 200, map[string]interface{}{
 		"id":      cid,
 		"object":  "chat.completion",
 		"created": created,
@@ -442,16 +424,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			"finish_reason": finish,
 		}},
 		"usage": usageOf(prompt, text, res),
-	}
-	retCID := convID
-	if retCID == "" && res != nil && res.ConvCID != "" {
-		retCID = res.ConvCID
-	}
-	if retCID != "" {
-		respData["conversation_id"] = retCID
-		w.Header().Set("X-Conversation-Id", retCID)
-	}
-	writeJSON(w, 200, respData)
+	})
 }
 
 // statusClientClosed 是客户端先断开时记进 requests 表的状态码（沿用 nginx 的 499）。
