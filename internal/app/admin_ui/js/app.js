@@ -157,6 +157,144 @@ const pages = {
     `;
   },
 
+  playground: async () => {
+    return `
+      <div class="pg-container page-fill">
+        <!-- Main Chat Area -->
+        <div class="pg-main">
+          <div class="pg-header">
+            <div class="pg-header-left">
+              <span class="spark" style="width:16px;height:16px;background:var(--g-sweep);border-radius:3px;display:inline-block;clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%)"></span>
+              <span style="font-weight:600;font-size:13.5px">Gemini Playground</span>
+              <span class="badge ok notranslate" id="pgCurModelBadge" style="margin-left:6px">gemini-3.6-flash</span>
+            </div>
+            <div class="pg-header-right" style="display:flex;gap:6px;align-items:center;">
+              <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--surface-hi);color:var(--text)" onclick="pgToggleSysPrompt()" title="${t('系统指令 (System Prompt)')}">
+                ${renderHugeIcon('edit', 14)} <span>${t('系统指令')}</span>
+              </button>
+              <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--surface-hi);color:var(--text)" onclick="pgShowCodeModal()" title="${t('查看代码 / Export code')}">
+                ${renderHugeIcon('copy', 14)} <span>${t('代码')}</span>
+              </button>
+              <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--surface-hi);color:var(--text)" onclick="pgClearChat()" title="${t('清空对话 / Clear chat')}">
+                ${renderHugeIcon('trash', 14)} <span>${t('清空')}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Collapsible System Prompt Banner -->
+          <div id="pgSysWrap" style="display:none;padding:10px 16px;border-bottom:1px solid var(--outline-soft);background:var(--surface-hi);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <span style="font-size:12px;color:var(--muted);font-weight:500">${t('系统指令 (System Prompt)')}</span>
+              <button class="icon-btn" style="width:24px;height:24px" onclick="pgToggleSysPrompt()">${renderHugeIcon('close', 14)}</button>
+            </div>
+            <textarea id="pgSysPrompt" rows="2" style="font-family:var(--sans);font-size:12.5px" placeholder="${t('可选：输入系统人设或指令（例如：你是一个精通全栈开发的资深工程师）...')}"></textarea>
+          </div>
+
+          <!-- Messages Container -->
+          <div class="pg-messages" id="pgMessages">
+            <div class="pg-welcome" id="pgWelcome">
+              <div style="width:48px;height:48px;background:var(--g-sweep);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%)"></div>
+              <h3 style="font-size:16px;font-weight:500;margin-bottom:6px">${t('Gemini Web2API Playground')}</h3>
+              <p style="font-size:13px;color:var(--muted);max-width:440px;margin-bottom:16px;line-height:1.5">${t('Prueba y experimenta directamente con todos los modelos de Gemini, razonamiento (thinking), llamadas a herramientas y streaming.')}</p>
+              <div class="pg-suggestions">
+                <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('¿Cuáles son las principales diferencias entre Gemini 1.5, 2.0 y 2.5 Flash?')}')">💡 ${t('Diferencias entre modelos Gemini')}</button>
+                <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('Escribe un script en Python con concurrencia para verificar el estado de una lista de URLs.')}')">🐍 ${t('Script Python concurrente')}</button>
+                <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('¿Cuál es el clima actual en Tokio y qué ropa me recomiendas llevar? Usa la herramienta.')}')">🌦️ ${t('Prueba de herramientas (Tools)')}</button>
+                <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('Si tengo 3 manzanas y me como 2, luego compro 5 y le regalo 1 a un amigo, ¿cuántas manzanas tengo? Explica paso a paso.')}')">🧠 ${t('Razonamiento paso a paso')}</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input Bar Area -->
+          <div class="pg-input-wrap">
+            <div class="pg-input-bar">
+              <textarea id="pgInput" rows="1" placeholder="${t('Escribe un mensaje... (Enter para enviar, Shift+Enter para nueva línea)')}" onkeydown="pgInputKeyDown(event)" oninput="pgAutoResize(this)"></textarea>
+              <button class="btn" id="pgSendBtn" onclick="pgSendMessage()" style="padding:10px 18px">
+                ${renderHugeIcon('plus', 16)} <span>${t('发送')}</span>
+              </button>
+              <button class="btn danger" id="pgStopBtn" onclick="pgStopGeneration()" style="display:none;padding:10px 18px">
+                ${renderHugeIcon('close', 16)} <span>${t('停止')}</span>
+              </button>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11.5px;color:var(--muted)">
+              <span id="pgStatus">${t('Listo para interactuar')}</span>
+              <span id="pgTokensInfo"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Sidebar Area -->
+        <div class="pg-sidebar">
+          <div style="font-weight:600;font-size:14px;border-bottom:1px solid var(--outline-soft);padding-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span>${t('Parámetros')}</span>
+            <button class="btn" style="padding:2px 8px;font-size:11px;background:var(--surface-hi)" onclick="pgResetSettings()">${t('Restablecer')}</button>
+          </div>
+
+          <!-- Model Selector -->
+          <div class="pg-group">
+            <label for="pgModelSel">${t('Modelo')}</label>
+            <select id="pgModelSel" onchange="pgOnModelChange()">
+              <!-- Filled dynamically by initPlayground -->
+            </select>
+          </div>
+
+          <!-- Temperature Slider -->
+          <div class="pg-group">
+            <label for="pgTemp"><span>${t('Temperatura')}</span><b id="pgTempVal">0.7</b></label>
+            <input type="range" id="pgTemp" min="0" max="2" step="0.1" value="0.7" oninput="document.getElementById('pgTempVal').textContent = this.value">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">
+              <span>${t('Preciso (0.0)')}</span>
+              <span>${t('Creativo (2.0)')}</span>
+            </div>
+          </div>
+
+          <!-- Streaming Toggle -->
+          <div class="pg-toggle-row">
+            <label for="pgStreamSwitch">
+              <span style="font-weight:500;font-size:13px">${t('Streaming')}</span>
+              <span class="rthint" style="display:block">${t('Recibir respuesta en tiempo real')}</span>
+            </label>
+            <input type="checkbox" class="switch" id="pgStreamSwitch" checked>
+          </div>
+
+          <!-- Multi-turn Toggle -->
+          <div class="pg-toggle-row">
+            <label for="pgMultiTurnSwitch">
+              <span style="font-weight:500;font-size:13px">${t('Historial multironda')}</span>
+              <span class="rthint" style="display:block">${t('Enviar contexto de mensajes previos')}</span>
+            </label>
+            <input type="checkbox" class="switch" id="pgMultiTurnSwitch" checked>
+          </div>
+
+          <!-- Tools Preset Selector -->
+          <div class="pg-group">
+            <label for="pgToolPreset">${t('Llamada a herramientas (Tools)')}</label>
+            <select id="pgToolPreset" onchange="pgOnToolPresetChange()">
+              <option value="none" selected>${t('Ninguna')}</option>
+              <option value="weather">⛅ get_weather(location, unit)</option>
+              <option value="web_search">🌐 web_search(query)</option>
+              <option value="calc">🔢 calculate(expression)</option>
+              <option value="custom">${t('Esquema JSON personalizado...')}</option>
+            </select>
+          </div>
+
+          <!-- Custom Tools JSON Textarea -->
+          <div class="pg-group" id="pgCustomToolsWrap" style="display:none">
+            <label for="pgCustomTools">${t('Definición de Tools (JSON)')}</label>
+            <textarea id="pgCustomTools" rows="5" style="font-size:11px" placeholder='[{"type":"function","function":{"name":"...","parameters":{...}}}]'></textarea>
+          </div>
+
+          <!-- Custom API Key (Optional) -->
+          <div class="pg-group">
+            <label for="pgApiKey">${t('API Key (Opcional)')}</label>
+            <input type="password" id="pgApiKey" placeholder="${t('Sesión de Admin actual')}">
+            <span class="rthint">${t('Dejar vacío para usar la sesión de administrador actual sin restricciones.')}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
   requests: async () => {
     return `
       <div class="panel page-fill">
@@ -1625,6 +1763,9 @@ async function switchPage(name, force = false) {
     document.getElementById('rangeSel').onchange = (e) => loadChart(e.target.value);
     await populateTestProxies();
   }
+  if (name === 'playground') {
+    await initPlayground();
+  }
   if (name === 'requests') {
     reqOffset = 0;
     document.getElementById('reqStatus').onchange = () => { reqOffset = 0; loadReqs(); };
@@ -1641,6 +1782,7 @@ function refreshPage() { return switchPage(currentPage, true); }
 
 const NAV = [
   ['dashboard', '概览'],
+  ['playground', 'Playground'],
   ['requests', '请求记录'],
   ['proxies', '代理池'],
   ['cookies', 'Cookie 池'],
@@ -1649,7 +1791,7 @@ const NAV = [
   ['about', '关于'],
 ];
 const PAGE_TITLES = {
-  dashboard: '概览', requests: '请求记录', proxies: '代理池', cookies: 'Cookie 池',
+  dashboard: '概览', playground: 'Playground', requests: '请求记录', proxies: '代理池', cookies: 'Cookie 池',
   keys: 'API Keys', settings: '设置',
   about: '关于',
 };
@@ -1923,6 +2065,567 @@ async function triggerAutoUpdate() {
     flash(t('更新失败'));
     if (btn) btn.disabled = false;
   }
+}
+
+// ── Playground Engine ────────────────────────────────────────────────────────
+const PG_TOOL_PRESETS = {
+  none: null,
+  weather: [
+    {
+      type: "function",
+      function: {
+        name: "get_weather",
+        description: "Obtener el clima actual y pronóstico para una ubicación",
+        parameters: {
+          type: "object",
+          properties: {
+            location: { type: "string", description: "Nombre de la ciudad, ej. Madrid, Tokio, Buenos Aires" },
+            unit: { type: "string", enum: ["celsius", "fahrenheit"], description: "Unidad métrica o imperial" }
+          },
+          required: ["location"]
+        }
+      }
+    }
+  ],
+  web_search: [
+    {
+      type: "function",
+      function: {
+        name: "web_search",
+        description: "Buscar información reciente en la web",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Término de búsqueda" }
+          },
+          required: ["query"]
+        }
+      }
+    }
+  ],
+  calc: [
+    {
+      type: "function",
+      function: {
+        name: "calculate",
+        description: "Calcular una expresión matemática aritmética o científica",
+        parameters: {
+          type: "object",
+          properties: {
+            expression: { type: "string", description: "Expresión matemática, ej: 144 / 12 * 5" }
+          },
+          required: ["expression"]
+        }
+      }
+    }
+  ]
+};
+
+let pgState = {
+  messages: [],
+  abortCtrl: null,
+  busy: false,
+};
+
+function pgFormatMarkdown(text) {
+  if (!text) return '';
+  let s = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  s = s.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    return `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`;
+  });
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/\*([^*]+)\*/g, '<i>$1</i>');
+  const parts = s.split(/(<pre[\s\S]*?<\/pre>)/g);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(/\n/g, '<br>');
+  }
+  return parts.join('');
+}
+
+function pgRenderToolCalls(container, toolCalls) {
+  if (!container || !toolCalls || !toolCalls.length) return;
+  container.innerHTML = toolCalls.map(tc => `
+    <div class="pg-tool-call">
+      <div style="font-weight:600;color:var(--g-blue);margin-bottom:2px">🔧 ${t('Tool Call')}: <code>${escapeHtml(tc.name || 'anonymous')}</code></div>
+      <div style="font-size:11.5px;color:var(--text);white-space:pre-wrap;font-family:var(--mono)">${escapeHtml(tc.arguments || '')}</div>
+    </div>
+  `).join('');
+}
+
+async function initPlayground() {
+  const sel = document.getElementById('pgModelSel');
+  if (!sel) return;
+
+  let models = [];
+  try {
+    const root = await fetch('../', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+    if (root && root.models && root.models.length) {
+      models = root.models;
+    }
+  } catch (e) {}
+
+  if (!models.length) {
+    models = [
+      'gemini-3.6-flash', 'gemini-4-argon', 'gemini-3.7-flash-thinking', 'gemini-3.7-flash',
+      'gemini-4-carbon', 'gemini-3.5-flash-lite', 'gemini-3.5-flash-lite-thinking',
+      'gemini-3.8-flash', 'gemini-4-argon-thinking-medium', 'gemini-4-hydrogen',
+      'gemini-3.6-flash-thinking', 'gemini-3.8-flash-thinking', 'gemini-4-hydrogen-thinking',
+      'gemini-canvas', 'gemini-image', 'gemini-music', 'gemini-video'
+    ];
+  }
+
+  const flash = [];
+  const thinking = [];
+  const nextgen = [];
+  const media = [];
+  const others = [];
+
+  for (const m of models) {
+    if (m.includes('thinking')) thinking.push(m);
+    else if (m.includes('flash') || m.includes('lite')) flash.push(m);
+    else if (m.includes('argon') || m.includes('carbon') || m.includes('hydrogen')) nextgen.push(m);
+    else if (m.includes('image') || m.includes('music') || m.includes('video') || m.includes('canvas')) media.push(m);
+    else others.push(m);
+  }
+
+  const makeOptGroup = (label, list) => {
+    if (!list.length) return '';
+    return `<optgroup label="${label}">${list.map(m => `<option value="${m}">${m}</option>`).join('')}</optgroup>`;
+  };
+
+  sel.innerHTML = [
+    makeOptGroup(t('⚡ Flash (Rápidos)'), flash),
+    makeOptGroup(t('🧠 Thinking (Razonamiento profundo)'), thinking),
+    makeOptGroup(t('🚀 Next-Gen (Argon / Carbon / Hydrogen)'), nextgen),
+    makeOptGroup(t('🎨 Multimedia & Canvas'), media),
+    makeOptGroup(t('Modelos adicionales'), others),
+  ].join('');
+
+  if (flash.includes('gemini-3.6-flash')) sel.value = 'gemini-3.6-flash';
+  else if (models.length) sel.value = models[0];
+
+  pgOnModelChange();
+  pgRenderMessages();
+}
+
+function pgRenderMessages() {
+  const box = document.getElementById('pgMessages');
+  if (!box) return;
+  if (!pgState.messages.length) return;
+  const welcome = document.getElementById('pgWelcome');
+  if (welcome) welcome.style.display = 'none';
+
+  box.innerHTML = pgState.messages.map(m => {
+    if (m.role === 'user') {
+      return `
+        <div class="pg-msg user">
+          <div class="pg-bubble">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
+        </div>
+      `;
+    } else {
+      const thoughtHTML = m.reasoning ? `
+        <details class="pg-thought">
+          <summary>${renderHugeIcon('star', 12)} ${t('Razonamiento (Thinking)')}</summary>
+          <div class="pg-thought-content">${escapeHtml(m.reasoning)}</div>
+        </details>
+      ` : '';
+      const toolsHTML = (m.tool_calls && m.tool_calls.length) ? m.tool_calls.map(tc => `
+        <div class="pg-tool-call">
+          <div style="font-weight:600;color:var(--g-blue);margin-bottom:2px">🔧 ${t('Tool Call')}: <code>${escapeHtml(tc.name || 'anonymous')}</code></div>
+          <div style="font-size:11.5px;color:var(--text);white-space:pre-wrap;font-family:var(--mono)">${escapeHtml(tc.arguments || '')}</div>
+        </div>
+      `).join('') : '';
+
+      return `
+        <div class="pg-msg assistant">
+          <div class="pg-bubble">
+            ${thoughtHTML}
+            ${toolsHTML}
+            <div>${pgFormatMarkdown(m.content || (toolsHTML ? '' : '(Sin texto)'))}</div>
+          </div>
+          <div class="pg-msg-meta">
+            <span>${escapeHtml(m.model || '')}</span> · <span>${m.latency || ''}s</span>
+          </div>
+        </div>
+      `;
+    }
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function pgToggleSysPrompt() {
+  const w = document.getElementById('pgSysWrap');
+  if (!w) return;
+  w.style.display = w.style.display === 'none' ? 'block' : 'none';
+  if (w.style.display === 'block') {
+    document.getElementById('pgSysPrompt').focus();
+  }
+}
+
+function pgClearChat() {
+  if (pgState.busy) pgStopGeneration();
+  pgState.messages = [];
+  const box = document.getElementById('pgMessages');
+  if (box) {
+    box.innerHTML = `
+      <div class="pg-welcome" id="pgWelcome">
+        <div style="width:48px;height:48px;background:var(--g-sweep);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%)"></div>
+        <h3 style="font-size:16px;font-weight:500;margin-bottom:6px">${t('Gemini Web2API Playground')}</h3>
+        <p style="font-size:13px;color:var(--muted);max-width:440px;margin-bottom:16px;line-height:1.5">${t('Prueba y experimenta directamente con todos los modelos de Gemini, razonamiento (thinking), llamadas a herramientas y streaming.')}</p>
+        <div class="pg-suggestions">
+          <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('¿Cuáles son las principales diferencias entre Gemini 1.5, 2.0 y 2.5 Flash?')}')">💡 ${t('Diferencias entre modelos Gemini')}</button>
+          <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('Escribe un script en Python con concurrencia para verificar el estado de una lista de URLs.')}')">🐍 ${t('Script Python concurrente')}</button>
+          <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('¿Cuál es el clima actual en Tokio y qué ropa me recomiendas llevar? Usa la herramienta.')}')">🌦️ ${t('Prueba de herramientas (Tools)')}</button>
+          <button class="pg-sug-btn" onclick="pgUseSuggestion('${t('Si tengo 3 manzanas y me como 2, luego compro 5 y le regalo 1 a un amigo, ¿cuántas manzanas tengo? Explica paso a paso.')}')">🧠 ${t('Razonamiento paso a paso')}</button>
+        </div>
+      </div>
+    `;
+  }
+  const tokInfo = document.getElementById('pgTokensInfo');
+  if (tokInfo) tokInfo.textContent = '';
+  const st = document.getElementById('pgStatus');
+  if (st) st.textContent = t('Listo para interactuar');
+}
+
+function pgUseSuggestion(text) {
+  const inp = document.getElementById('pgInput');
+  if (inp) {
+    inp.value = text;
+    pgAutoResize(inp);
+    pgSendMessage();
+  }
+}
+
+function pgAutoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+function pgInputKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    pgSendMessage();
+  }
+}
+
+function pgOnModelChange() {
+  const m = document.getElementById('pgModelSel')?.value || '';
+  const badge = document.getElementById('pgCurModelBadge');
+  if (badge) badge.textContent = m;
+}
+
+function pgOnToolPresetChange() {
+  const v = document.getElementById('pgToolPreset')?.value;
+  const wrap = document.getElementById('pgCustomToolsWrap');
+  if (wrap) wrap.style.display = v === 'custom' ? 'block' : 'none';
+}
+
+function pgResetSettings() {
+  const temp = document.getElementById('pgTemp');
+  if (temp) { temp.value = 0.7; document.getElementById('pgTempVal').textContent = '0.7'; }
+  const streamSw = document.getElementById('pgStreamSwitch');
+  if (streamSw) streamSw.checked = true;
+  const mtSw = document.getElementById('pgMultiTurnSwitch');
+  if (mtSw) mtSw.checked = true;
+  const tp = document.getElementById('pgToolPreset');
+  if (tp) { tp.value = 'none'; pgOnToolPresetChange(); }
+  const key = document.getElementById('pgApiKey');
+  if (key) key.value = '';
+}
+
+function pgStopGeneration() {
+  if (pgState.abortCtrl) {
+    pgState.abortCtrl.abort();
+    pgState.abortCtrl = null;
+  }
+  pgSetBusy(false);
+  const st = document.getElementById('pgStatus');
+  if (st) st.textContent = t('Detenido por el usuario');
+}
+
+function pgSetBusy(b) {
+  pgState.busy = b;
+  const sendBtn = document.getElementById('pgSendBtn');
+  const stopBtn = document.getElementById('pgStopBtn');
+  if (sendBtn) sendBtn.style.display = b ? 'none' : 'inline-flex';
+  if (stopBtn) stopBtn.style.display = b ? 'inline-flex' : 'none';
+  const inp = document.getElementById('pgInput');
+  if (inp && !b) inp.focus();
+}
+
+async function pgSendMessage() {
+  if (pgState.busy) return;
+  const inputEl = document.getElementById('pgInput');
+  const userText = (inputEl.value || '').trim();
+  if (!userText) return;
+
+  inputEl.value = '';
+  pgAutoResize(inputEl);
+
+  const welcome = document.getElementById('pgWelcome');
+  if (welcome) welcome.style.display = 'none';
+
+  pgState.messages.push({ role: 'user', content: userText });
+
+  const msgBox = document.getElementById('pgMessages');
+  const userDiv = document.createElement('div');
+  userDiv.className = 'pg-msg user';
+  userDiv.innerHTML = `<div class="pg-bubble">${escapeHtml(userText).replace(/\n/g, '<br>')}</div>`;
+  msgBox.appendChild(userDiv);
+
+  const model = document.getElementById('pgModelSel')?.value || 'gemini-3.6-flash';
+  const asstDiv = document.createElement('div');
+  asstDiv.className = 'pg-msg assistant';
+  asstDiv.innerHTML = `
+    <div class="pg-bubble">
+      <details class="pg-thought" style="display:none" open>
+        <summary>${renderHugeIcon('star', 12)} ${t('Razonamiento (Thinking)')}</summary>
+        <div class="pg-thought-content"></div>
+      </details>
+      <div class="pg-tools-holder"></div>
+      <div class="pg-text-holder"><span class="pg-cursor"></span></div>
+    </div>
+    <div class="pg-msg-meta">
+      <span>${escapeHtml(model)}</span> · <span class="pg-meta-time">...</span>
+    </div>
+  `;
+  msgBox.appendChild(asstDiv);
+  msgBox.scrollTop = msgBox.scrollHeight;
+
+  const thoughtWrap = asstDiv.querySelector('.pg-thought');
+  const thoughtText = asstDiv.querySelector('.pg-thought-content');
+  const toolsHolder = asstDiv.querySelector('.pg-tools-holder');
+  const textHolder = asstDiv.querySelector('.pg-text-holder');
+  const metaTime = asstDiv.querySelector('.pg-meta-time');
+
+  const isStream = document.getElementById('pgStreamSwitch')?.checked ?? true;
+  const isMultiTurn = document.getElementById('pgMultiTurnSwitch')?.checked ?? true;
+  const temp = parseFloat(document.getElementById('pgTemp')?.value || '0.7');
+  const sysPrompt = (document.getElementById('pgSysPrompt')?.value || '').trim();
+  const customKey = (document.getElementById('pgApiKey')?.value || '').trim();
+
+  let reqMessages = [];
+  if (sysPrompt) {
+    reqMessages.push({ role: 'system', content: sysPrompt });
+  }
+  if (isMultiTurn) {
+    for (const m of pgState.messages) {
+      if (m.role === 'user' || m.role === 'assistant') {
+        reqMessages.push({ role: m.role, content: m.content || '' });
+      }
+    }
+  } else {
+    reqMessages.push({ role: 'user', content: userText });
+  }
+
+  const payload = {
+    model: model,
+    messages: reqMessages,
+    temperature: temp,
+    stream: isStream,
+  };
+
+  const toolPreset = document.getElementById('pgToolPreset')?.value || 'none';
+  if (toolPreset === 'custom') {
+    try {
+      const customTools = JSON.parse(document.getElementById('pgCustomTools')?.value || '[]');
+      if (Array.isArray(customTools) && customTools.length > 0) payload.tools = customTools;
+    } catch (e) {
+      toast('Error JSON: ' + e.message);
+    }
+  } else if (PG_TOOL_PRESETS[toolPreset]) {
+    payload.tools = PG_TOOL_PRESETS[toolPreset];
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (customKey) {
+    headers['Authorization'] = 'Bearer ' + customKey;
+  }
+
+  pgSetBusy(true);
+  const st = document.getElementById('pgStatus');
+  if (st) st.textContent = t('Generando respuesta...');
+  const startTime = performance.now();
+  let fullContent = '';
+  let fullReasoning = '';
+  let toolCalls = [];
+
+  pgState.abortCtrl = new AbortController();
+
+  try {
+    const resp = await fetch('../v1/chat/completions', {
+      method: 'POST',
+      credentials: 'include',
+      headers: headers,
+      body: JSON.stringify(payload),
+      signal: pgState.abortCtrl.signal,
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
+      const errMsg = errData.error?.message || errData.error || ('HTTP ' + resp.status);
+      throw new Error(errMsg);
+    }
+
+    if (isStream) {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const raw = trimmed.slice(6);
+          if (raw === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(raw);
+            const delta = parsed.choices?.[0]?.delta;
+            if (!delta) continue;
+
+            if (delta.reasoning_content) {
+              fullReasoning += delta.reasoning_content;
+              thoughtWrap.style.display = 'block';
+              thoughtText.textContent = fullReasoning;
+            }
+            if (delta.content) {
+              fullContent += delta.content;
+              textHolder.innerHTML = pgFormatMarkdown(fullContent) + '<span class="pg-cursor"></span>';
+            }
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index || 0;
+                if (!toolCalls[idx]) {
+                  toolCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' };
+                }
+                if (tc.function?.name) toolCalls[idx].name = tc.function.name;
+                if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
+              }
+              pgRenderToolCalls(toolsHolder, toolCalls);
+            }
+          } catch (e) {}
+        }
+        msgBox.scrollTop = msgBox.scrollHeight;
+      }
+    } else {
+      const data = await resp.json();
+      const msg = data.choices?.[0]?.message;
+      if (msg) {
+        if (msg.reasoning_content) {
+          fullReasoning = msg.reasoning_content;
+          thoughtWrap.style.display = 'block';
+          thoughtText.textContent = fullReasoning;
+        }
+        if (msg.content) {
+          fullContent = msg.content;
+        }
+        if (msg.tool_calls) {
+          toolCalls = msg.tool_calls.map(tc => ({
+            id: tc.id,
+            name: tc.function?.name || '',
+            arguments: tc.function?.arguments || ''
+          }));
+          pgRenderToolCalls(toolsHolder, toolCalls);
+        }
+      }
+    }
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+    textHolder.innerHTML = pgFormatMarkdown(fullContent || (toolCalls.length ? '' : '(Sin respuesta de texto)'));
+    metaTime.textContent = elapsed + 's';
+    if (st) st.textContent = t('Listo para interactuar');
+
+    pgState.messages.push({
+      role: 'assistant',
+      content: fullContent,
+      reasoning: fullReasoning,
+      tool_calls: toolCalls,
+      model: model,
+      latency: elapsed
+    });
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      textHolder.innerHTML = pgFormatMarkdown(fullContent) + ' <span style="color:var(--muted);font-style:italic">[' + t('Detenido') + ']</span>';
+      if (st) st.textContent = t('Detenido por el usuario');
+    } else {
+      textHolder.innerHTML = `<span style="color:var(--fail)">❌ ${escapeHtml(err.message)}</span>`;
+      if (st) st.textContent = t('Error al generar respuesta');
+    }
+  } finally {
+    pgSetBusy(false);
+    pgState.abortCtrl = null;
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+}
+
+function pgShowCodeModal() {
+  const model = document.getElementById('pgModelSel')?.value || 'gemini-3.6-flash';
+  const isStream = document.getElementById('pgStreamSwitch')?.checked ?? true;
+  const temp = parseFloat(document.getElementById('pgTemp')?.value || '0.7');
+  const sysPrompt = (document.getElementById('pgSysPrompt')?.value || '').trim();
+  const customKey = (document.getElementById('pgApiKey')?.value || '').trim() || '<YOUR_API_KEY>';
+
+  let messages = [];
+  if (sysPrompt) messages.push({ role: 'system', content: sysPrompt });
+  if (pgState.messages.length) {
+    for (const m of pgState.messages) {
+      if (m.role === 'user' || m.role === 'assistant') {
+        messages.push({ role: m.role, content: m.content || '' });
+      }
+    }
+  } else {
+    messages.push({ role: 'user', content: 'Hello, how can you help me?' });
+  }
+
+  const payload = {
+    model: model,
+    messages: messages,
+    temperature: temp,
+    stream: isStream,
+  };
+
+  const toolPreset = document.getElementById('pgToolPreset')?.value || 'none';
+  if (toolPreset !== 'none' && PG_TOOL_PRESETS[toolPreset]) {
+    payload.tools = PG_TOOL_PRESETS[toolPreset];
+  }
+
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const curlCmd = `curl -X POST http://localhost:8844/v1/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${customKey}" \\\n  -d '${jsonStr.replace(/'/g, "'\\''")}'`;
+
+  const pyCode = `import os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="http://localhost:8844/v1",\n    api_key="${customKey}",\n)\n\nresponse = client.chat.completions.create(\n    model="${model}",\n    messages=${JSON.stringify(messages, null, 4)},\n    temperature=${temp},\n    stream=${isStream ? 'True' : 'False'},\n)\n\n${isStream ? "for chunk in response:\n    if chunk.choices and chunk.choices[0].delta.content:\n        print(chunk.choices[0].delta.content, end='', flush=True)" : "print(response.choices[0].message.content)"}\n`;
+
+  const modalHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--outline-soft);padding-bottom:8px">
+      <button class="btn notranslate" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('pgCurlBox').style.display='block';document.getElementById('pgPyBox').style.display='none';">cURL</button>
+      <button class="btn notranslate" style="padding:4px 12px;font-size:12px;background:var(--surface-hi);color:var(--text)" onclick="document.getElementById('pgCurlBox').style.display='none';document.getElementById('pgPyBox').style.display='block';">Python (OpenAI SDK)</button>
+    </div>
+    <div id="pgCurlBox">
+      <textarea readonly rows="12" style="font-family:var(--mono);font-size:11.5px;width:100%">${escapeHtml(curlCmd)}</textarea>
+    </div>
+    <div id="pgPyBox" style="display:none">
+      <textarea readonly rows="12" style="font-family:var(--mono);font-size:11.5px;width:100%">${escapeHtml(pyCode)}</textarea>
+    </div>
+  `;
+
+  buildModal({
+    title: t('Código de ejemplo / API Code'),
+    desc: t('Ejecuta la misma petición en terminal o integración con OpenAI SDK:'),
+    bodyHTML: modalHTML,
+    submitText: t('Copiar cURL'),
+    onSubmit: () => {
+      navigator.clipboard.writeText(curlCmd);
+      toast(t('Código copiado al portapapeles'));
+      return true;
+    }
+  });
 }
 
 // ── Theme (Dark Mode) Manager ─────────────────────────────────────────────

@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
@@ -94,13 +95,6 @@ func setAPIKey(k string) error {
 // 命中后把 *APIKey 放进 request context，下游据此限制可用账号。
 func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		dbKeys, hasDeploy := apiKeyCounts()
-		if dbKeys == 0 && !hasDeploy {
-			// 没有任何 key 配置：保持旧行为，放行（正常启动 initAPIKeys 会保证
-			// 至少生成一把默认 Key，这里只覆盖测试/异常场景）。
-			next(w, r)
-			return
-		}
 		got := ""
 		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 			got = strings.TrimSpace(h[7:])
@@ -114,8 +108,17 @@ func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 		if got == "" {
 			got = strings.TrimSpace(r.URL.Query().Get("key"))
 		}
-		k := authenticateAPIKey(got)
-		if k == nil {
+
+		if got != "" {
+			if cfg.AdminToken != "" && subtle.ConstantTimeCompare([]byte(got), []byte(cfg.AdminToken)) == 1 {
+				next(w, r)
+				return
+			}
+			k := authenticateAPIKey(got)
+			if k != nil {
+				next(w, r.WithContext(withAPIKeyContext(r.Context(), k)))
+				return
+			}
 			writeJSON(w, 401, map[string]interface{}{
 				"error": map[string]string{
 					"message": "Invalid API key. Set Authorization: Bearer <key>, x-api-key, x-goog-api-key or ?key=.",
@@ -125,7 +128,26 @@ func requireAPIKey(next http.HandlerFunc) http.HandlerFunc {
 			})
 			return
 		}
-		next(w, r.WithContext(withAPIKeyContext(r.Context(), k)))
+
+		// Allow requests from the Web Admin Playground via valid session cookie
+		if c, err := r.Cookie(sessionCookieName); err == nil && validSession(c.Value) {
+			next(w, r)
+			return
+		}
+
+		dbKeys, hasDeploy := apiKeyCounts()
+		if dbKeys == 0 && !hasDeploy {
+			next(w, r)
+			return
+		}
+
+		writeJSON(w, 401, map[string]interface{}{
+			"error": map[string]string{
+				"message": "Invalid API key. Set Authorization: Bearer <key>, x-api-key, x-goog-api-key or ?key=.",
+				"type":    "invalid_request_error",
+				"code":    "invalid_api_key",
+			},
+		})
 	}
 }
 

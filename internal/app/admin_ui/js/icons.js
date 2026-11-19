@@ -1,6 +1,7 @@
 // Hugeicons (stroke: 1.5, round caps/joins, 24x24 viewBox)
 const ICONS = {
   dashboard: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/>',
+  playground: '<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>',
   requests: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   proxies: '<circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.5 3 4 6 4 9.5s-1.5 6.5-4 9.5c-2.5-3-4-6-4-9.5s1.5-6.5 4-9.5z"/>',
   cookies: '<path d="M12 21.5a9.5 9.5 0 10-9.5-9.5c0 .3.02.6.05.9 1.45.2 2.65 1.15 3.1 2.5.4 1.25 1.45 2.15 2.75 2.3.35 1.55 1.5 2.8 3.05 3.3.15.35.35.45.55.5z"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="9.5" r="1" fill="currentColor"/><circle cx="13" cy="14" r="1" fill="currentColor"/><circle cx="8" cy="14" r="1" fill="currentColor"/>',

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // setTestAPIKeys 临时替换进程内的 key store，测试结束恢复。
@@ -79,5 +80,38 @@ func TestRequireAPIKeyRejectsDisabled(t *testing.T) {
 	h(w, req)
 	if w.Code != 401 {
 		t.Fatalf("disabled key: got %d, want 401", w.Code)
+	}
+}
+
+func TestRequireAPIKeyAllowsAdminSessionCookie(t *testing.T) {
+	setTestAPIKeys(t, &APIKey{
+		ID: 1, Name: "test", Key: "test-key-0123456789abcdef",
+		Enabled: true, AllowAll: true,
+	})
+
+	token := newSessionToken()
+	createSession(token, time.Hour)
+
+	h := requireAPIKey(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	w := httptest.NewRecorder()
+	h(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("admin session cookie should allow access: got %d, want 200", w.Code)
+	}
+
+	// Invalid session cookie should be rejected
+	reqInvalid := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	reqInvalid.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "invalid-token-12345"})
+	wInvalid := httptest.NewRecorder()
+	h(wInvalid, reqInvalid)
+
+	if wInvalid.Code != 401 {
+		t.Fatalf("invalid session cookie should be rejected: got %d, want 401", wInvalid.Code)
 	}
 }
