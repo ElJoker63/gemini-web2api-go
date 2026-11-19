@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,9 +131,9 @@ func rejectUnsupported(req map[string]interface{}, messages []map[string]interfa
 	return nil
 }
 
-func callGemini(prompt, latest string, mc ModelConfig, tools []map[string]interface{},
+func callGemini(ctx context.Context, prompt string, pc promptCtx, mc ModelConfig, tools []map[string]interface{},
 	images []pendingUpload, onDelta, onReasoning func(string)) (string, []ToolCall, *StreamResult, error) {
-	res, err := streamGenerateWithFiles(prompt, latest, mc, images, onDelta, onReasoning)
+	res, err := streamGenerateWithFiles(ctx, prompt, pc, mc, images, onDelta, onReasoning, toolCallComplete(tools))
 	if err != nil {
 		// res 非 nil：失败时它只带归属（哪个号 / 哪个出口），给 recordRequest 用
 		return "", nil, res, err
@@ -278,7 +279,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prompt, latest := messagesToPrompt(messages, tools, req["tool_choice"])
+	prompt, pc := messagesToPrompt(messages, tools, req["tool_choice"])
 	if strings.TrimSpace(prompt) == "" && len(images) == 0 {
 		writeJSON(w, 400, map[string]interface{}{"error": map[string]string{"message": "empty prompt"}})
 		return
@@ -336,12 +337,15 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	conversationRequested := rtCfg().MultiTurn || rtCfg().TemporaryChat || convID != ""
 	if conversationRequested && len(images) == 0 && modelCfg.Tool == 0 {
 		// 多轮：按历史前缀识别续接，命中就只发新消息、历史留服务端。带 tools 也走这条。
-		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning, convID)
+		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning, convID)
 	} else {
-		text, toolCalls, res, err = callGemini(prompt, latest, modelCfg, tools, images, onDelta, onReasoning)
+		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, onReasoning)
 	}
 	ka.Stop() // 之后的收尾回到单 goroutine 写；Started() 也要在保活停下后再看
 	if err != nil {
+		if clientGone(r, "chat.completions", modelName, prompt, res, stream) {
+			return
+		}
 		if accStatus, ok := apiAccountErrorStatus(err); ok {
 			recordRequest("chat.completions", modelName, prompt, "", res, accStatus, err.Error(), stream)
 			if sse != nil && sse.Started() {
@@ -448,6 +452,21 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Conversation-Id", retCID)
 	}
 	writeJSON(w, 200, respData)
+}
+
+// statusClientClosed 是客户端先断开时记进 requests 表的状态码（沿用 nginx 的 499）。
+const statusClientClosed = 499
+
+// clientGone 判断失败是不是因为客户端已经断开；是的话记一条 499 并返回 true。
+//
+// 这时连接已经没了，再写 502 / 流错误没人收。记成 502 会让「用户自己取消」看起来
+// 像上游故障；499 + "client disconnected" 在面板的失败列表里一眼能分清。
+func clientGone(r *http.Request, endpoint, model, prompt string, res *StreamResult, stream bool) bool {
+	if r.Context().Err() == nil {
+		return false
+	}
+	recordRequest(endpoint, model, prompt, "", res, statusClientClosed, "client disconnected", stream)
+	return true
 }
 
 // usageOf 是 buildUsageWithReasoning 的便捷包装，res 可能为 nil。
@@ -651,7 +670,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prompt, latest := messagesToPrompt(messages, tools, req["tool_choice"])
+	prompt, pc := messagesToPrompt(messages, tools, req["tool_choice"])
 	if strings.TrimSpace(prompt) == "" && len(images) == 0 {
 		writeJSON(w, 400, map[string]interface{}{"error": map[string]string{"message": "empty input"}})
 		return
@@ -760,12 +779,15 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		logf("[conv] prompt %d 字节超过上限 %d，首轮回退普通 Responses 路径（文本附件）", len([]byte(prompt)), rtCfg().MaxPromptBytes)
 	}
 	if useConversation {
-		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, nil, previousResponseID)
+		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, nil, previousResponseID)
 	} else {
-		text, toolCalls, res, err = callGemini(prompt, latest, modelCfg, tools, images, onDelta, nil)
+		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, nil)
 	}
 	ka.Stop()
 	if err != nil {
+		if clientGone(r, "responses", modelName, prompt, res, stream) {
+			return
+		}
 		if accStatus, ok := apiAccountErrorStatus(err); ok {
 			recordRequest("responses", modelName, prompt, "", res, accStatus, err.Error(), stream)
 			if stream {

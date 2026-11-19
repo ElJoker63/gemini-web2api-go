@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -437,7 +438,7 @@ func getAnonSession(proxyURL string) (string, error) {
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		r.Header.Set("User-Agent", currentBrowserUA())
+		setChromeHeaders(r.Header)
 		resp, err := getTLSClient().Do(r)
 		if err != nil {
 			return nil, nil, nil, err
@@ -476,8 +477,11 @@ const webUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 // streamGenerateConv 发一路会话的一轮。turn==0 是首轮（建会话），>0 是续接（只发新消息）。
 // 整条会话绑定 conv.cookie / conv.proxyID，中途不换号不换出口。成功后回填 conv 的
 // cid/rid/rcid/tok26 和 turn+1，供下一轮续接。
-func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
+func streamGenerateConv(ctx context.Context, prompt string, mc ModelConfig, conv *convState,
 	onDelta, onReasoning func(string)) (*StreamResult, error) {
+	if err := ctx.Err(); err != nil {
+		return &StreamResult{}, err
+	}
 	// 登录态会话每轮重新读一次账号的独占绑定：管理员可能在会话期间改了
 	// proxy_id / 独占开关。独占账号必须严格走当前绑定出口；普通账号继续用
 	// 会话首轮记下的出口偏好。
@@ -679,7 +683,10 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 	t0 := time.Now()
 	var lastErr error
 	for attempt := 0; attempt < rtCfg().RetryAttempts; attempt++ {
-		statusCode, raw, ttfb, setCookie, err := doGeminiRequest(endpoint, body, geminiHeaders, proxyURL, lineCB)
+		if cerr := ctx.Err(); cerr != nil {
+			return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, cerr
+		}
+		statusCode, raw, ttfb, setCookie, err := doGeminiRequestStop(ctx, endpoint, body, geminiHeaders, proxyURL, lineCB, nil)
 		if len(setCookie) > 0 && conv.cookie != "" {
 			if merged := mergeSetCookie(conv.cookie, setCookie); merged != conv.cookie {
 				conv.cookie = merged
@@ -693,6 +700,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 				Emitted: tracker.emitted, EmittedReasoning: rtracker.emitted}, err
 		}
 		if err != nil || statusCode != 200 || !hasContentFrame(string(raw)) {
+			if cerr := ctx.Err(); cerr != nil {
+				return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, cerr
+			}
 			if err == nil && statusCode == 200 {
 				lastErr = fmt.Errorf("续接无内容帧（会话可能已失效，raw %d 字节）", len(raw))
 			} else if err != nil {
@@ -701,7 +711,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 				lastErr = fmt.Errorf("upstream HTTP %d: %s", statusCode, truncate(string(raw), 160))
 			}
 			// 出错话术跟出口无关，不记进代理健康度
-			if pickedOK && !errors.Is(err, errUpstreamFailureReply) {
+			if pickedOK && !errors.Is(err, errUpstreamFailureReply) && !errors.Is(err, context.Canceled) {
 				recordProxyResult(p.ID, false, lastErr.Error())
 			}
 			if tracker.emitted != "" || rtracker.emitted != "" {
@@ -715,7 +725,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 				if errors.Is(err, errUpstreamFailureReply) {
 					logf("retry %d/%d: %v", attempt+1, rtCfg().RetryAttempts, err)
 				}
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, werr
+				}
 			}
 			continue
 		}
@@ -727,7 +739,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 			}
 			if attempt < rtCfg().RetryAttempts-1 {
 				logf("retry %d/%d: %v", attempt+1, rtCfg().RetryAttempts, lastErr)
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, werr
+				}
 			}
 			continue
 		}
@@ -776,7 +790,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 //   - 没命中 → 新建会话，首轮发全量拼接的历史（含 tools 指令，把当前上下文交给服务端）。
 //
 // 支持 tools（续接里也解析 ```tool_call``` 围栏）；图片走原单轮路径（callGemini）。
-func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
+func callGeminiConv(ctx context.Context, messages []map[string]interface{}, mc ModelConfig,
 	tools []map[string]interface{}, toolChoice interface{},
 	onDelta, onReasoning func(string), explicitConvID ...string) (string, []ToolCall, *StreamResult, error) {
 	convID := ""
@@ -843,7 +857,7 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 				}
 			}
 		}
-		res, err = streamGenerateConv(prompt, mc, conv, onDelta, onReasoning)
+		res, err = streamGenerateConv(ctx, prompt, mc, conv, onDelta, onReasoning)
 		if err != nil && fresh && conv.accountID > 0 && (res == nil || (res.Emitted == "" && res.EmittedReasoning == "")) {
 			exclude[conv.accountID] = true
 			logf("[conv] 账号 #%d 首轮失败 (%v)，尝试换号重试...", conv.accountID, err)
@@ -888,7 +902,7 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 					conv.proxyID = a.ProxyID
 				}
 			}
-			res, err = streamGenerateConv(prompt, mc, conv, onDelta, onReasoning)
+			res, err = streamGenerateConv(ctx, prompt, mc, conv, onDelta, onReasoning)
 			if err != nil && conv.accountID > 0 && (res == nil || (res.Emitted == "" && res.EmittedReasoning == "")) {
 				exclude[conv.accountID] = true
 				logf("[conv] 降级账号 #%d 失败 (%v)，尝试换号重试...", conv.accountID, err)

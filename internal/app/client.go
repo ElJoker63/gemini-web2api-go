@@ -56,10 +56,19 @@ func resolveProfile(name string) profiles.ClientProfile {
 // For proxied connections we use stdlib (see getStdlibClient) — tls-client's SOCKS5
 // implementation is fragile compared to net/http.
 func getTLSClient() tls_client.HttpClient {
+	return tlsClientWithin(rtCfg().RequestTimeout)
+}
+
+// getTLSStreamClient 同 getTLSClient，但不限整次请求的时长，给 StreamGenerate 用：
+// 还在出字的回复可以比 request_timeout_sec 长。
+func getTLSStreamClient() tls_client.HttpClient {
+	return tlsClientWithin(0)
+}
+
+func tlsClientWithin(timeout int) tls_client.HttpClient {
 	imp := effectiveImpersonate()
 	// 缓存 key 带上超时：超时是建客户端时定死的，面板改了 request_timeout_sec
 	// 要换一个新客户端才生效（只按 imp 缓存时要重启进程才生效）。
-	timeout := rtCfg().RequestTimeout
 	key := fmt.Sprintf("%s|%d", imp, timeout)
 	clientCacheMu.RLock()
 	if c, ok := clientCache[key]; ok {
@@ -112,8 +121,16 @@ var (
 // getStdlibClient returns an http.Client routed through proxyURL.
 // proxyURL must not be empty (caller checks).
 func getStdlibClient(proxyURL string) *http.Client {
+	return stdlibClientWithin(proxyURL, rtCfg().RequestTimeout)
+}
+
+// getStdlibStreamClient 同 getStdlibClient，但不限整次请求的时长（见 getTLSStreamClient）。
+func getStdlibStreamClient(proxyURL string) *http.Client {
+	return stdlibClientWithin(proxyURL, 0)
+}
+
+func stdlibClientWithin(proxyURL string, timeout int) *http.Client {
 	// 同 getTLSClient：超时进 key，面板改超时后换新客户端。
-	timeout := rtCfg().RequestTimeout
 	key := fmt.Sprintf("%s|%d", proxyURL, timeout)
 	if cached, ok := stdlibClientCache.Load(key); ok {
 		return cached.(*http.Client)
@@ -224,6 +241,37 @@ func currentBrowserUA() string {
 	return ChromeUA
 }
 
+var chromeHeaders = [][2]string{
+	{"User-Agent", ChromeUA},
+	{"Sec-CH-UA", `"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="24"`},
+	{"Sec-CH-UA-Mobile", "?0"},
+	{"Sec-CH-UA-Platform", `"Windows"`},
+	{"Sec-Fetch-Dest", "empty"},
+	{"Sec-Fetch-Mode", "cors"},
+	{"Sec-Fetch-Site", "same-origin"},
+}
+
+// setChromeHeaders 把对应 impersonate 配置的应用层 header 填进 net/http 或 fhttp 的 Header。
+// 调用方之后再写自己的 header，同名的以调用方为准。
+func setChromeHeaders(h interface {
+	Set(key, value string)
+	Del(key string)
+}) {
+	if isFirefoxProfile() {
+		h.Set("User-Agent", FirefoxUA)
+		h.Del("Sec-CH-UA")
+		h.Del("Sec-CH-UA-Mobile")
+		h.Del("Sec-CH-UA-Platform")
+		h.Set("Sec-Fetch-Dest", "empty")
+		h.Set("Sec-Fetch-Mode", "cors")
+		h.Set("Sec-Fetch-Site", "same-origin")
+		return
+	}
+	for _, kv := range chromeHeaders {
+		h.Set(kv[0], kv[1])
+	}
+}
+
 // applyChromeHeaders 给 stdlib 请求填上应用层 header（根据 impersonate 配置自动适配 Chrome 或 Firefox）。
 func applyChromeHeaders(req *http.Request) {
 	applyBrowserHeaders(req)
@@ -231,21 +279,5 @@ func applyChromeHeaders(req *http.Request) {
 
 // applyBrowserHeaders 给 stdlib 请求填上对应 impersonate 配置的应用层 header。
 func applyBrowserHeaders(req *http.Request) {
-	if isFirefoxProfile() {
-		req.Header.Set("User-Agent", FirefoxUA)
-		req.Header.Del("Sec-CH-UA")
-		req.Header.Del("Sec-CH-UA-Mobile")
-		req.Header.Del("Sec-CH-UA-Platform")
-		req.Header.Set("Sec-Fetch-Dest", "empty")
-		req.Header.Set("Sec-Fetch-Mode", "cors")
-		req.Header.Set("Sec-Fetch-Site", "same-origin")
-		return
-	}
-	req.Header.Set("User-Agent", ChromeUA)
-	req.Header.Set("Sec-CH-UA", `"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="24"`)
-	req.Header.Set("Sec-CH-UA-Mobile", "?0")
-	req.Header.Set("Sec-CH-UA-Platform", `"Windows"`)
-	req.Header.Set("Sec-Fetch-Dest", "empty")
-	req.Header.Set("Sec-Fetch-Mode", "cors")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	setChromeHeaders(req.Header)
 }

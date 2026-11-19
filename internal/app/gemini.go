@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
@@ -468,6 +469,59 @@ func (d *deltaTracker) Push(fullText string) string {
 	return delta
 }
 
+type lineHandler struct {
+	tracker, rtracker *deltaTracker
+	stop              atomic.Bool
+	cb                func(string) error // nil 表示不需要逐行处理
+}
+
+func newLineHandler(onDelta, onReasoning func(string), stopWhen func(string) bool, check func(string) error) *lineHandler {
+	lh := &lineHandler{tracker: &deltaTracker{}, rtracker: &deltaTracker{}}
+	if onDelta == nil && onReasoning == nil && stopWhen == nil && check == nil {
+		return lh
+	}
+	watch := lh.tracker
+	if onDelta == nil {
+		watch = &deltaTracker{}
+	}
+	lh.cb = func(line string) error {
+		if check != nil {
+			if err := check(line); err != nil {
+				return err
+			}
+		}
+		// 出错话术在吐给客户端之前拦下，中断读取走重试。
+		if failureReplyInLine(line) {
+			return errUpstreamFailureReply
+		}
+		// 思考链先推完才轮到正文，所以先处理它，客户端拿到的顺序才对。
+		if onReasoning != nil {
+			if r := reasoningInLine(line); r != "" {
+				if d := lh.rtracker.Push(r); d != "" {
+					onReasoning(d)
+				}
+			}
+		}
+		if onDelta == nil && stopWhen == nil {
+			return nil
+		}
+		grew := false
+		for _, t := range renderedTextsInLine(line, false) {
+			if d := watch.Push(t); d != "" {
+				grew = true
+				if onDelta != nil {
+					onDelta(d)
+				}
+			}
+		}
+		if grew && stopWhen != nil && stopWhen(watch.emitted) {
+			lh.stop.Store(true)
+		}
+		return nil
+	}
+	return lh
+}
+
 // pinnedAccountError 表示 PinAccountID 指定的号用不了：Err 为 nil 是号被删 / 停用，
 // 否则是登录态失效（Err 是取 XSRF 的错）。调用方靠它判断「换下一个号」，不比文案。
 type pinnedAccountError struct {
@@ -492,7 +546,7 @@ func (e *pinnedAccountError) Unwrap() error { return e.Err }
 // 自己做。一旦已经吐过内容就不再重试——重试会让客户端收到重复文本。
 func streamGenerate(prompt, latest string, mc ModelConfig,
 	onDelta, onReasoning func(string)) (*StreamResult, error) {
-	return streamGenerateWithFiles(prompt, latest, mc, nil, onDelta, onReasoning)
+	return streamGenerateWithFiles(context.Background(), prompt, promptCtx{Latest: latest}, mc, nil, onDelta, onReasoning, nil)
 }
 
 // fileRef 是一个已上传附件的引用。
@@ -507,15 +561,22 @@ type fileRef struct {
 //
 // 附件填 inner[0][3]，形状 [[[ref, 1], "文件名"], …]。附件只在登录态可用：
 // 匿名能把文件传上去，但对话里一引用就被服务端回 1100。
-func streamGenerateWithFiles(prompt, latest string, mc ModelConfig, pending []pendingUpload,
-	onDelta, onReasoning func(string)) (*StreamResult, error) {
+//
+// stopWhen 非 nil 时，每帧拿当前累积正文问一次；返回 true 就不再读上游、按已收到
+// 的内容收尾。用于工具调用：围栏闭合时调用就已确定，上游最后一次改正文之后还要
+// 再推几秒收尾帧，没必要让客户端干等。
+//
+// ctx 是客户端请求的 context：客户端断开后中止上游读取、上传和重试等待，不再替
+// 已经走掉的请求生成。取消导致的失败不记进代理 / cookie 健康度，那不是它们的错。
+func streamGenerateWithFiles(ctx context.Context, prompt string, pc promptCtx, mc ModelConfig, pending []pendingUpload,
+	onDelta, onReasoning func(string), stopWhen func(string) bool) (*StreamResult, error) {
 	// strict_model 换号：被降级的号记冷却、本次排除，换下一个号重来。上限跟 XSRF 换号
 	// 一样是 maxCookieTries——连着几个号都降级，说明池子整体见底，不是撞上个别号。
 	exclude := map[int64]bool{}
 	var res *StreamResult
 	var err error
 	for try := 0; try < maxCookieTries; try++ {
-		next, nextErr := streamGenerateOnce(prompt, latest, mc, pending, onDelta, onReasoning, exclude)
+		next, nextErr := streamGenerateOnce(ctx, prompt, pc, mc, pending, onDelta, onReasoning, stopWhen, exclude)
 		var exhausted *ModelDowngradedError
 		if try > 0 && errors.As(nextErr, &exhausted) && exhausted.Reported == "" {
 			// 换号时已经没号可挑：报上一个号真实的降级（带自报模型名），补上解冻时间
@@ -533,9 +594,13 @@ func streamGenerateWithFiles(prompt, latest string, mc ModelConfig, pending []pe
 	return res, err
 }
 
-func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pendingUpload,
-	onDelta, onReasoning func(string), exclude map[int64]bool) (*StreamResult, error) {
+func streamGenerateOnce(ctx context.Context, prompt string, pc promptCtx, mc ModelConfig, pending []pendingUpload,
+	onDelta, onReasoning func(string), stopWhen func(string) bool, exclude map[int64]bool) (*StreamResult, error) {
 	var files []fileRef
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// 先挑号，再按它上次绑的出口挑代理 —— 同一个账号要尽量固定从同一个 IP 出去，
 	// 否则一个号在几十个出口之间跳，在 Google 眼里就是账号共享的特征。
@@ -718,7 +783,10 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 		}
 		nImg, nVid := 0, 0
 		for _, u := range pending {
-			ref, uerr := uploadBytes(cookieStr, authUser, proxyURL, u.Data, u.Name)
+			ref, uerr := uploadBytesCtx(ctx, cookieStr, authUser, proxyURL, u.Data, u.Name)
+			if err := ctx.Err(); err != nil {
+				return attrib(err)
+			}
 			if uerr != nil {
 				return attrib(fmt.Errorf("上传附件 %s 失败: %w", u.Name, uerr))
 			}
@@ -735,7 +803,7 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 	// prompt 超长时转成文本附件。要等挑完号和出口才能做：上传要 cookie，
 	// 而且必须走跟正式请求同一个出口。
 	budget := rtCfg().MaxPromptBytes
-	if p, f, used, ferr := prepareContextFile(prompt, latest, budget, cookieStr, authUser, proxyURL); ferr != nil {
+	if p, f, used, ferr := prepareContextFile(ctx, prompt, pc, budget, cookieStr, authUser, proxyURL); ferr != nil {
 		return attrib(ferr)
 	} else if used {
 		prompt = p
@@ -880,40 +948,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 	xsrfRetried := false // XSRF 自愈只做一次，避免死循环
 	t0 := time.Now()
 
-	tracker := &deltaTracker{}
-	rtracker := &deltaTracker{}
 	strictCheck := strictLineCheck(mc, func() int64 { return cookieID })
-	var lineCB func(string) error
-	if onDelta != nil || onReasoning != nil || strictCheck != nil {
-		lineCB = func(line string) error {
-			if strictCheck != nil {
-				if err := strictCheck(line); err != nil {
-					return err
-				}
-			}
-			// 出错话术在吐给客户端之前拦下，中断读取走下面的重试。
-			if failureReplyInLine(line) {
-				return errUpstreamFailureReply
-			}
-			// 思考链先推完才轮到正文，所以先处理它，客户端拿到的顺序才对。
-			if onReasoning != nil {
-				if r := reasoningInLine(line); r != "" {
-					if d := rtracker.Push(r); d != "" {
-						onReasoning(d)
-					}
-				}
-			}
-			if onDelta == nil {
-				return nil
-			}
-			for _, t := range renderedTextsInLine(line, false) {
-				if d := tracker.Push(t); d != "" {
-					onDelta(d)
-				}
-			}
-			return nil
-		}
-	}
+	lh := newLineHandler(onDelta, onReasoning, stopWhen, strictCheck)
+	tracker, rtracker := lh.tracker, lh.rtracker
 
 	// 新协议（#43）：同一个 inner，只换传输层；返回的 raw 已包成老格式，下面的判断原样适用。
 	useWC := rtCfg().WebChannel
@@ -923,6 +960,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 		Cookie: cookieStr, SAPISID: sapisid, AuthUser: authUser,
 	}
 	for attempt := 0; attempt < rtCfg().RetryAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return attrib(err)
+		}
 		var statusCode int
 		var raw []byte
 		var ttfb int64
@@ -930,9 +970,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 		var err error
 		if useWC {
 			wcReq.Cookie = cookieStr
-			statusCode, raw, ttfb, setCookie, err = doWebChannelRequest(wcReq, proxyURL, lineCB)
+			statusCode, raw, ttfb, setCookie, err = doWebChannelRequest(wcReq, proxyURL, lh.cb)
 		} else {
-			statusCode, raw, ttfb, setCookie, err = doGeminiRequest(endpoint, body, geminiHeaders, proxyURL, lineCB)
+			statusCode, raw, ttfb, setCookie, err = doGeminiRequestStop(ctx, endpoint, body, geminiHeaders, proxyURL, lh.cb, &lh.stop)
 		}
 		if len(setCookie) > 0 && cookieID > 0 {
 			if merged := mergeSetCookie(cookieStr, setCookie); merged != cookieStr {
@@ -951,10 +991,13 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 			return res, err
 		}
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return attrib(cerr)
+			}
 			lastErr = err
 			// 出错话术不记进代理健康度：匿名直连也一样出，跟出口无关，算进去会误熔断。
 			// 空闲超时同理不记：首字节已经到了（出口通的），是上游开流后自己卡住，不是出口的锅。
-			if pickedOK && !errors.Is(err, errUpstreamFailureReply) && !errors.Is(err, errIdleTimeout) {
+			if pickedOK && !errors.Is(err, errUpstreamFailureReply) && !errors.Is(err, errIdleTimeout) && !errors.Is(err, context.Canceled) {
 				recordProxyResult(picked.ID, false, err.Error())
 			}
 			// 已经往客户端吐过内容就不能重试，否则会重复（思考链也算吐过）。
@@ -967,7 +1010,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 			}
 			if attempt < rtCfg().RetryAttempts-1 {
 				logf("retry %d/%d: %v", attempt+1, rtCfg().RetryAttempts, err)
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return attrib(werr)
+				}
 			}
 			continue
 		}
@@ -996,7 +1041,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 				break
 			}
 			if attempt < rtCfg().RetryAttempts-1 {
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return attrib(werr)
+				}
 			}
 			continue
 		}
@@ -1024,7 +1071,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 			}
 			if attempt < rtCfg().RetryAttempts-1 {
 				logf("retry %d/%d: 空响应（无内容帧，%d 字节）", attempt+1, rtCfg().RetryAttempts, len(raw))
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return attrib(werr)
+				}
 			}
 			continue
 		}
@@ -1036,7 +1085,9 @@ func streamGenerateOnce(prompt, latest string, mc ModelConfig, pending []pending
 			}
 			if attempt < rtCfg().RetryAttempts-1 {
 				logf("retry %d/%d: %v", attempt+1, rtCfg().RetryAttempts, lastErr)
-				time.Sleep(time.Duration(rtCfg().RetryDelaySec) * time.Second)
+				if werr := sleepCtx(ctx, time.Duration(rtCfg().RetryDelaySec)*time.Second); werr != nil {
+					return attrib(werr)
+				}
 			}
 			continue
 		}
@@ -1175,18 +1226,41 @@ func setAuthUserHeaders(h map[string]string, authuser int) {
 	h["X-Goog-AuthUser"] = strconv.Itoa(authuser)
 }
 
-// doGeminiRequest 发一次请求到 endpoint。proxyURL 非空走 stdlib（支持 socks5/http），
-// 空走 tls-client（chrome146 真指纹）。返回 (HTTP status, body bytes, err)。
-// 返回值多了 setCookie：服务端几乎每个响应都在刷新 SIDCC / __Secure-1PSIDCC /
-// __Secure-3PSIDCC，浏览器收下再带回去。一直发旧值的客户端会被判定为过期会话，
-// 实测号活一两小时就失效 —— 所以这些必须收下来并写回账号。
-func doGeminiRequest(endpoint, body string, headers map[string]string, proxyURL string,
-	onLine func(string) error) (int, []byte, int64, []string, error) {
+// stopReader 在 stop 置位后让下一次 Read 直接返回 EOF：调用方已经拿到想要的内容，
+// 剩下的上游帧不再等。已经读进 Scanner 缓冲的行照常处理完。
+type stopReader struct {
+	io.ReadCloser
+	stop *atomic.Bool
+}
+
+func (s stopReader) Read(p []byte) (int, error) {
+	if s.stop != nil && s.stop.Load() {
+		return 0, io.EOF
+	}
+	return s.ReadCloser.Read(p)
+}
+
+// sleepCtx 等 d；ctx 先结束就提前返回它的错误。
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// doGeminiRequestStop 同 doGeminiRequest，stop 置位后提前结束读取（见 stopReader），
+// ctx 结束时中止连接和读取。
+func doGeminiRequestStop(ctx context.Context, endpoint, body string, headers map[string]string, proxyURL string,
+	onLine func(string) error, stop *atomic.Bool) (int, []byte, int64, []string, error) {
 	sendAt := time.Now()
 	idle := time.Duration(rtCfg().StreamIdleTimeoutSec) * time.Second
 	if proxyURL != "" {
 		// 走 stdlib 的 http.ProxyURL，已知能过 socks5/socks5h。
-		req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(body))
 		if err != nil {
 			return 0, nil, 0, nil, err
 		}
@@ -1194,13 +1268,13 @@ func doGeminiRequest(endpoint, body string, headers map[string]string, proxyURL 
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
-		client := getStdlibClient(proxyURL)
+		client := getStdlibStreamClient(proxyURL)
 		resp, err := client.Do(req)
 		if err != nil {
 			return 0, nil, 0, nil, err
 		}
 		defer resp.Body.Close()
-		raw, ttfb, err := readBodyWithIdle(resp.Body, onLine, sendAt, idle)
+		raw, ttfb, err := readBodyWithIdle(stopReader{resp.Body, stop}, onLine, sendAt, idle)
 		if err != nil {
 			return resp.StatusCode, nil, ttfb, resp.Header.Values("Set-Cookie"), err
 		}
@@ -1208,24 +1282,35 @@ func doGeminiRequest(endpoint, body string, headers map[string]string, proxyURL 
 	}
 
 	// 直连 → tls-client，保留 chrome146 TLS/HTTP2 真指纹
-	req, err := fhttp.NewRequest("POST", endpoint, strings.NewReader(body))
+	req, err := fhttp.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(body))
 	if err != nil {
 		return 0, nil, 0, nil, err
 	}
+	setChromeHeaders(req.Header)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	client := getTLSClient()
+	client := getTLSStreamClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, 0, nil, err
 	}
 	defer resp.Body.Close()
-	raw, ttfb, err := readBodyWithIdle(resp.Body, onLine, sendAt, idle)
+	raw, ttfb, err := readBodyWithIdle(stopReader{resp.Body, stop}, onLine, sendAt, idle)
 	if err != nil {
 		return resp.StatusCode, nil, ttfb, resp.Header.Values("Set-Cookie"), err
 	}
 	return resp.StatusCode, raw, ttfb, resp.Header.Values("Set-Cookie"), nil
+}
+
+// doGeminiRequest 发一次请求到 endpoint。proxyURL 非空走 stdlib（支持 socks5/http），
+// 空走 tls-client（chrome146 真指纹）。返回 (HTTP status, body bytes, err)。
+// 返回值多了 setCookie：服务端几乎每个响应都在刷新 SIDCC / __Secure-1PSIDCC /
+// __Secure-3PSIDCC，浏览器收下再带回去。一直发旧值的客户端会被判定为过期会话，
+// 实测号活一两小时就失效 —— 所以这些必须收下来并写回账号。
+func doGeminiRequest(endpoint, body string, headers map[string]string, proxyURL string,
+	onLine func(string) error) (int, []byte, int64, []string, error) {
+	return doGeminiRequestStop(context.Background(), endpoint, body, headers, proxyURL, onLine, nil)
 }
 
 // readBody 读完整个响应体并原样返回；onLine 非 nil 时每读到一行就回调一次，
@@ -1687,6 +1772,7 @@ func probeGemini(prompt, proxyURL string, proxyID int64) ProbeResult {
 			res.Diagnostic = "构建请求失败: " + e.Error()
 			return res
 		}
+		setChromeHeaders(req.Header)
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
