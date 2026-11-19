@@ -6,6 +6,8 @@
 
 ### 新增与优化 / Features & Improvements
 
+- **支持 Gemini 4 Neon / Gemini 4 Neon Support**:
+  - 新增 `gemini-4-neon` 与 `gemini-4-neon-thinking` 模型路由（Mode=3 换芯接管 3.1 Pro 槽位，定位前沿编程/Agent，需登录 Google AI Pro/Ultra 订阅账号）。
 - **Web 管理面板交互式演练场 (Playground) / Interactive Web Playground**:
   - 管理面板新增完整 Playground 标签页，支持直接在网页端调试与测试所有 Gemini 模型。
   - 支持 SSE 实时流式响应渲染、可折叠深度思考 (Thinking / Reasoning) 区块、以及 Markdown / 代码高亮。
