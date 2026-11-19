@@ -1700,7 +1700,7 @@ function renderShell() {
              title="${t('GitHub 仓库')}" aria-label="GitHub">
             ${renderHugeIcon('github', 18)}
           </a>
-          <button class="btn" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="${t('切换语言 / Switch language')}">EN</button>
+          <button class="btn notranslate" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="${t('切换语言 / Switch language')}">${getLangLabel()}</button>
           <span class="dot" id="healthDot"></span>
           <span class="muted" id="healthText">${t('运行中')}</span>
         </div>
@@ -1708,9 +1708,10 @@ function renderShell() {
       <main id="main"></main>
     </div>
   `;
-  switchPage(currentPage || 'dashboard');
+  switchPage(currentPage || 'dashboard', true);
   loadSideStat();
   checkUpdate(false);
+  updateLangBtn();
 }
 
 async function loadSideStat() {
@@ -1737,6 +1738,13 @@ async function loadSideStat() {
 
 function renderLogin() {
   document.getElementById('app').innerHTML = `
+    <div style="position:fixed;top:16px;right:20px;display:flex;gap:8px;align-items:center;">
+      <button class="icon-btn" id="themeBtn" onclick="toggleTheme()"
+              title="${t('切换主题')}" aria-label="${t('切换主题')}">
+        ${renderHugeIcon(THEME === 'dark' ? 'sun' : 'moon', 18)}
+      </button>
+      <button class="btn notranslate" id="langBtn" onclick="toggleLang()" style="padding:5px 10px;font-size:12px" title="${t('切换语言 / Switch language')}">${getLangLabel()}</button>
+    </div>
     <div class="login-box">
       <h1><span class="spark" style="width:20px;height:20px;background:var(--g-sweep);
         border-radius:4px;display:inline-block;
@@ -1747,6 +1755,7 @@ function renderLogin() {
       <div id="loginErr" class="err"></div>
     </div>`;
   if (LANG !== 'zh') translateTree(document.getElementById('app'), LANG);
+  updateLangBtn();
   document.getElementById('tokenInput').focus();
   document.getElementById('tokenInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
@@ -1758,7 +1767,10 @@ async function doLogin() {
   const r = await fetch('api/login', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token: tok }) });
-  if (r.ok) renderShell();
+  if (r.ok) {
+    renderShell();
+    updateLangBtn();
+  }
   else document.getElementById('loginErr').textContent = t('Token 错误');
 }
 
@@ -2055,6 +2067,7 @@ function translateTree(root, lang = LANG) {
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let n;
   while ((n = w.nextNode())) {
+    if (n.parentElement && (n.parentElement.closest('#langBtn') || n.parentElement.closest('.notranslate'))) continue;
     const raw = n.nodeValue;
     let orig = ZH_ORIG.get(n);
     if (!orig) {
@@ -2146,9 +2159,18 @@ function i18nInit() {
   if (LANG !== 'zh') i18nApply();
 }
 
+function getLangLabel(l = LANG) {
+  return l === 'es' ? 'ES' : (l === 'en' ? 'EN' : '中文');
+}
+
 function updateLangBtn() {
   const b = document.getElementById('langBtn');
-  if (b) b.textContent = LANG === 'es' ? 'ES' : (LANG === 'en' ? 'EN' : '中');
+  if (b) {
+    b.textContent = getLangLabel();
+    const titleText = t('切换语言 / Switch language');
+    b.title = titleText;
+    b.setAttribute('title', titleText);
+  }
   document.documentElement.lang = LANG === 'es' ? 'es' : (LANG === 'en' ? 'en' : 'zh-CN');
   document.title = LANG === 'es'
     ? 'gemini-web2api Panel de Administración'
@@ -2159,9 +2181,12 @@ async function toggleLang() {
   LANG = LANG === 'zh' ? 'en' : (LANG === 'en' ? 'es' : 'zh');
   try { localStorage.setItem('lang', LANG); } catch (e) {}
   await loadLocale(LANG);
+  if (document.querySelector('.login-box')) {
+    renderLogin();
+  } else {
+    renderShell();
+  }
   updateLangBtn();
-  renderShell();
-  if (currentPage) switchPage(currentPage, true);
 }
 
 // ── Application Boot ───────────────────────────────────────────────────────
