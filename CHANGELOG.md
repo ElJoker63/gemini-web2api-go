@@ -2,6 +2,26 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.30.5
+
+### 新增与优化 / Features & Improvements
+
+- **Web 管理面板交互式演练场 (Playground) / Interactive Web Playground**:
+  - 管理面板新增完整 Playground 标签页，支持直接在网页端调试与测试所有 Gemini 模型。
+  - 支持 SSE 实时流式响应渲染、可折叠深度思考 (Thinking / Reasoning) 区块、以及 Markdown / 代码高亮。
+  - 深度支持 Tool Calling：提供实时预设工具（天气查询、计算器、网页搜索）及自定义工具 JSON 编辑器，支持自动执行 Mock 回填续接。
+  - 支持导出即用型 cURL 与 Python 代码片段，支持通过当前管理员 Session Cookie 免配置 API Key 发起测试。
+- **性能与协议优化 (来自 magpie-gemini-web) / Protocol & Performance Optimizations**:
+  - 精简 Tool JSON Schema（移除冗余 `$schema`、`additionalProperties`、`title`），大幅降低 Token 消耗并规避上游解析异常。
+  - 上下文断开与取消感知（Request Context Propagation）：客户端中断时立即级联取消上游请求，释放网络与代理连接池资源。
+  - 工具围栏截断拦截（`stopReader`）：在流式探测到 ` ```tool_call ` 时立即停止读取并解析，避免泄漏未经格式化的内部标记。
+  - 后台静默刷新 XSRF Token，防止长连接或空闲后 Token 过期导致的调用失败。
+- **会话与通知修复 / Conversation & Notification Fix**:
+  - 修复了 `/v1/chat/completions` 强制开启服务端多轮导致在 Google 账户内残留对话列表并向移动端发送不必要通知的问题。
+  - 恢复标准无状态会话派发与原生 `temporary_chat` 临时对话支持，客户端聊天记录由客户端历史自主驱动且不在 Google 端持久留痕。
+- **国际化与语言按钮同步 / UI & i18n Fix**:
+  - 修复顶栏语言切换按钮标签在页面初始化时被静态覆盖的问题，确保中英西三语言即时动态同步。
+
 ## 4.30.3
 
 ### 修复与完善 / Fixes & Improvements
