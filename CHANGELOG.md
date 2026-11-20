@@ -2,6 +2,19 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.31.0
+
+### 新增与优化 / Features & Improvements
+
+- **官方原生 Gemini 4 Neon 支持与 3.1 Pro 别名无缝接替 / Native Gemini 4 Neon & 3.1 Pro Alias**:
+  - 正式采用 Google `otAQ7b` 原生主 Hex `e6fa609c3fa255c0`，全面上线 `gemini-4-neon` 与 `gemini-4-neon-thinking`（付费 / Ultra 号专属）。
+  - `gemini-3.1-pro` 与 `gemini-3.1-pro-thinking` 解除已下线限制，转为 `gemini-4-neon` 的向后兼容别名，无缝重定向无需客户端做破坏性修改。
+- **请求超时上限扩充至 1200 秒 / Timeout Upper Bound to 1200s (#83)**:
+  - `request_timeout_sec` 配置上限从 600 秒提高至 1200 秒（20 分钟），适配 Carbon / Neon 等慢速且超长思考链模型，避免长任务被全局超时截断。
+  - 管理面板运行时配置同步放宽至 1200 秒输入范围。
+- **模型描述修正 / Model Description Update**:
+  - 更新 `gemini-4-carbon` 说明，反映免费账号请求时上游实际回退至 4 Hydrogen。
+
 ## 4.30.6
 
 ### 新增与优化 / Features & Improvements
