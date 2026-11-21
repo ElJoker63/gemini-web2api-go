@@ -29,8 +29,9 @@ Convierte la web de Google Gemini en una API compatible con OpenAI, ofreciendo e
 - [Conexión con clientes](#conexión-con-clientes)
 - [API Keys y cuentas exclusivas](#api-keys-y-cuentas-exclusivas)
 - [Modelos soportados](#modelos-soportados)
-- [Pool de Cookies](#pool-de-cookies)
-- [Pool de Proxies](#pool-de-proxies)
+- [Pool de Cookies y Requisito Obligatorio de OSID](#pool-de-cookies-y-requisito-obligatorio-de-osid)
+- [Pool de Proxies y Vínculo Estricto](#pool-de-proxies-y-vínculo-estricto)
+- [Logs del Sistema en Memoria (Admin UI y REST API)](#logs-del-sistema-en-memoria-admin-ui-y-rest-api)
 - [Opciones de configuración (CLI y config.json)](#opciones-de-configuración-cli-y-configjson)
 - [Licencia](#licencia)
 
@@ -40,12 +41,14 @@ Convierte la web de Google Gemini en una API compatible con OpenAI, ofreciendo e
 
 - **Totalmente compatible con OpenAI:** `/v1/chat/completions`, `/v1/models`, `/v1/responses`. Funciona con cualquier cliente estándar (OpenAI SDK, LangChain, LlamaIndex, Chatbox, NextChat, OpenCode, Hermes Agent, etc.).
 - **Streaming real (SSE):** Las respuestas se envían en tiempo real token por token con latencia mínima.
+- **Soporte avanzado para Agentes y Herramientas (Function Calling):** Flujos multi-paso sin interrupciones ni alucinaciones de límite de cuota (Issue #91).
+- **Visor de Logs en Memoria en Tiempo Real:** Cola circular de 1000 líneas (`LogRingBuffer`) accesible desde el panel web `/admin` y mediante API REST (`/admin/api/logs`), sin desgaste en disco.
 - **Auto-actualización integrada:** Actualiza el binario directamente desde GitHub Releases con el comando `--update` o con un solo clic desde el Panel de Administración.
 - **Soporte multilingüe en el Panel de Administración:** Interfaz web completa con selector de idioma en **Español (ES)**, **Inglés (EN)** y **Chino (中)**.
 - **Huella TLS real (Chrome 146):** Evita la detección anti-bot de Cloudflare y Google emulando la pila TLS/JA3/HTTP2 exacta de navegadores modernos.
-- **Pool de Cookies inteligente:** Soporta múltiples cuentas de Google, rotación automática y refresco en segundo plano de cookies (`__Secure-1PSIDTS`, `__Secure-1PSIDCC`).
+- **Pool de Cookies inteligente:** Soporta múltiples cuentas de Google, rotación automática, refresco en segundo plano (`__Secure-1PSIDTS`, `__Secure-1PSIDCC`) y validación preventiva de la cookie obligatoria `OSID`.
 - **Múltiples API Keys con Listas Blancas:** Crea diferentes API Keys para tus usuarios o aplicaciones y asigna qué cuentas de Google pueden utilizar.
-- **IP exclusiva por Cookie:** Permite vincular un proxy específico a una cuenta para que nunca mezcle tráfico con otras cuentas o peticiones anónimas.
+- **Vínculo Estricto de IP por Cuenta (`strict_proxy_binding`):** Asegura que cada cuenta salga siempre por el mismo proxy asignado o exclusivo, previniendo baneos de Google por salto de IPs.
 - **Herramientas y Multimedia:** Soporta llamadas a funciones (tool calling), generación de imágenes (Nano Banana), música (Lyria), modo Canvas y videos (Veo).
 
 ---
@@ -166,31 +169,59 @@ for chunk in response:
 | :--- | :--- | :--- |
 | `gemini-3.5-flash-lite` | Modelo ultrarrápido y ligero. | Funciona en modo anónimo (sin cuenta). |
 | `gemini-3.6-flash` | Modelo balanceado de alta velocidad. | Anónimo o con cuenta de Google. |
+| `gemini-3.7-flash` | Modelo Flash con razonamiento híbrido y alta velocidad. | Cuenta de Google (gratuita o de pago). |
 | `gemini-3.8-flash` | Versión avanzada de Flash con mayor capacidad de contexto. | Cuenta de Google (gratuita o de pago). |
 | `gemini-4-hydrogen` | Modelo 4 Hydrogen con cadena de pensamiento extendida. | Cuenta de Google estándar. |
-| `gemini-4-carbon` (antes `gemini-4-argon`) | Modelo más avanzado para razonamiento complejo. | Cuenta de Google con suscripción Google One / Ultra. |
+| `gemini-4-carbon` (antes `gemini-4-argon`) | Modelo avanzado para razonamiento complejo y código. | Cuenta de Google con suscripción Google One / Ultra. |
+| `gemini-4-neon` | Modelo insignia 4 Neon con razonamiento y pensamiento profundo. | Cuenta de Google con suscripción Google One / Ultra. |
+| `gemini-*-thinking` | Variantes con cadena de razonamiento visible (`thinking`). | Mismo requisito que el modelo base. |
 | `gemini-image` | Generación de imágenes (Nano Banana). | Cuenta de Google conectada. |
 | `gemini-music` | Generación de música instrumental de ~30s (Lyria). | Cuenta de Google conectada. |
 | `gemini-canvas` | Generación de documentos interactivos HTML. | Cuenta de Google conectada. |
-| `gemini-video` | Generación de video con modelo Veo. | Cuenta de Google con suscripción. |
+| `gemini-video` | Generación de video con modelo Veo (`/v1/videos`). | Cuenta de Google con suscripción. |
+
+---
+
+## Pool de Cookies y Requisito Obligatorio de OSID
+
+1. Inicia sesión con tu cuenta de Google en [gemini.google.com](https://gemini.google.com).
+2. Abre las herramientas de desarrollo (**F12**) → pestaña **Red (Network)** → haz una pregunta o recarga → selecciona una petición hacia `gemini.google.com` → clic derecho **«Copiar como cURL»** y copia toda la línea del encabezado `Cookie:`.
+3. La cadena de cookies debe contener al menos: `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-1PSID`, `__Secure-1PSIDTS`, `__Secure-3PSID`, `__Secure-1PSIDCC` y **`OSID`**.
+4. Pega la cadena en el panel web: **Cookie Pool → Agregar Cuenta** (o impórtalas con `--cookie-file cookies.txt`).
+
+> ⚠️ **Requisito obligatorio de `OSID`**: Desde noviembre de 2026, Google exige obligatoriamente la cookie `OSID` propia del host `gemini.google.com`. Sin ella, Google redirige las peticiones a `accounts.google.com` (HTTP 302). Nuestro panel detecta esto preventivamente y marcará la cuenta con la etiqueta **«Falta OSID»**.
+>
+> 💡 **Recomendación de navegador:** Se recomienda exportar las cookies desde **Firefox**. Las versiones recientes de Google Chrome activan *Device Bound Session Credentials* (DBSC), enlazando la sesión al chip criptográfico del equipo local; al exportarlas a un servidor externo, Chrome invalida la rotación (`*PSIDTS`) en pocas horas. Firefox no impone esta restricción.
 
 ---
 
 ## API Keys y cuentas exclusivas
 
 En la sección **API Keys** del panel de administración (`/admin`):
-- Puedes crear múltiples API Keys independientes.
+- Puedes crear múltiples API Keys independientes para tus aplicaciones o usuarios.
 - Cada clave puede configurarse para tener acceso a **todas las cuentas** o únicamente a una lista blanca de cuentas seleccionadas.
-- En el **Pool de Cookies**, puedes marcar una cuenta con **«Exclusivo para esta IP»**, garantizando que esa cuenta utilice únicamente un proxy específico asignado.
+- En el **Pool de Cookies**, puedes marcar una cuenta con **«Exclusivo para esta IP»**, garantizando que esa cuenta utilice únicamente el proxy asignado.
 
 ---
 
-## Pool de Proxies
+## Pool de Proxies y Vínculo Estricto
 
 Para maximizar el volumen de peticiones y evitar límites de tasa por IP de Google:
 - Puedes agregar múltiples proxies HTTP, HTTPS o SOCKS5 en la pestaña **Pool de Proxies**.
-- Cada proxy cuenta con límites independientes de concurrencia, peticiones por minuto (RPM) y peticiones por hora (RPH).
-- Si usas proxies rotativos o dinámicos, puedes establecer `proxy_cooldown_min: -1` para que los proxies no se desactiven automáticamente tras fallos transitorios.
+- **Adherencia de IP por Cuenta:** Cada cuenta se vincula automáticamente al primer proxy que utiliza para evitar que Google detecte saltos sospechosos de IP.
+- **Vínculo Estricto (`strict_proxy_binding`):** Activando esta opción en Configuración, una cuenta jamás cambiará de IP de salida. Si el proxy asignado se llena o entra en enfriamiento por fallos, el proxy esperará o cambiará de cuenta, pero no mezclará la IP del usuario.
+- En la ventana de edición de cada cookie en el panel web, puedes **asignar manualmente** qué proxy debe usar esa cuenta en particular.
+
+---
+
+## Logs del Sistema en Memoria (Admin UI y REST API)
+
+El proxy incluye un búfer circular de registros en memoria RAM (`LogRingBuffer`) de 1000 líneas de capacidad:
+- **Cero desgaste de disco:** Totalmente seguro para almacenamiento flash/SSD y entornos en contenedores.
+- **Visor en el Panel Web:** Pestaña **«Logs del sistema»** en `/admin` con auto-actualización cada 2 segundos, filtro por módulo (`cookie`, `rotate`, `bl`, `proxy`, `context`), filtro por nivel (`INFO`, `WARN`, `ERROR`), búsqueda por palabras clave y copia al portapapeles.
+- **API REST disponible:**
+  - `GET /admin/api/logs?format=text|json&tail=100`: Obtiene las últimas N líneas en formato JSON o texto plano.
+  - `DELETE /admin/api/logs`: Vacía el búfer de logs en caliente.
 
 ---
 
@@ -205,6 +236,7 @@ Para maximizar el volumen de peticiones y evitar límites de tasa por IP de Goog
 | `--api-key` | Fija una clave API maestra de despliegue de solo lectura. |
 | `--cookie-file` | Importa un archivo de cookies al inicio. |
 | `--proxy` | Proxy de respaldo por defecto. |
+| `--strict-proxy-binding` | Activa la vinculación estricta de cuentas a sus proxies asignados. |
 | `--update` | Comprueba y aplica la auto-actualización del binario desde GitHub. |
 | `--version` | Muestra la versión actual y finaliza. |
 
