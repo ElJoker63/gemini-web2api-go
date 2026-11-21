@@ -544,5 +544,11 @@
   "Código copiado al portapapeles": "Código copiado al portapapeles",
   "Código de ejemplo / API Code": "Código de ejemplo (API Code)",
   "Ejecuta la misma petición en terminal o integración con OpenAI SDK:": "Ejecuta la misma petición en terminal o integración con OpenAI SDK:",
-  "Copiar cURL": "Copiar cURL"
+  "Copiar cURL": "Copiar cURL",
+  "缺 OSID": "Falta OSID",
+  "缺 OSID：gemini.google.com 现在要求这一项，缺了会被跳去登录页。请在 gemini.google.com 页面重新导出": "Falta OSID: gemini.google.com ahora requiere esta cookie o redirigirá al inicio de sesión. Reexporte las cookies desde gemini.google.com",
+  "gemini.google.com 自己的登录 cookie，缺了会被跳去登录页": "Cookie de inicio de sesión propia de gemini.google.com; sin ella se redirige al inicio de sesión",
+  "这串 cookie 里没有 OSID。gemini.google.com 现在要求这一项，缺了请求会被跳去登录页。请在已登录的 gemini.google.com 页面重新导出（F12 → 网络 → 任一发往 gemini.google.com 的请求 → 复制为 cURL）。": "Esta cookie no contiene OSID. gemini.google.com ahora requiere este valor o las solicitudes serán redirigidas al inicio de sesión. Por favor reexporte desde gemini.google.com con sesión iniciada (F12 → Red → cualquier petición a gemini.google.com → Copiar como cURL).",
+  "仍然导入": "Importar de todos modos",
+  "cookie 缺 OSID：gemini.google.com 现在要求这一项，请在 gemini.google.com 页面重新导出": "Cookie sin OSID: gemini.google.com ahora requiere este valor, reexporte desde la página gemini.google.com"
 }

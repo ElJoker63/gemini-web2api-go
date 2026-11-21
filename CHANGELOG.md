@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.31.1
+
+2026-11-20 前后起，**gemini.google.com 要求 cookie 里带 `OSID`**，缺了打开 Gemini 就被 302 到 Google 登录页（`accounts.google.com/ServiceLogin?...&osid=1`），导致所有登录号同时失效（#90）。
+
+### 修复与完善 / Fixes & Improvements
+
+- **全面适配 Google Gemini 必需的 `OSID` Cookie / Mandatory OSID Cookie Support**:
+  - `cookieTemplateOrder` 与 `keyCookieWants` 补充 `OSID` 字段，管理面板 Cookie 池关键项扩展为 10 项。
+  - 针对缺少 `OSID` 的账号显式标注「缺 OSID」警示徽章，避免用户误判账号封禁。
+  - 导入缺少 `OSID` 的 Cookie 时触发弹窗确认，并在日志输出提醒。
+  - 抓取 `/app` 遇 302 重定向到登录页且 Cookie 缺少 `OSID` 时，明确报错点名「(cookie 缺 OSID)」，并提示在已登录的 `gemini.google.com` 页面重新导出。
+- **直连 TLS 请求头对齐与文档导航头优化 / Direct TLS Headers Alignment (#87)**:
+  - 统一直接 TLS 连接（fhttp）的应用层浏览器请求头，在媒体产物获取、图片上传与 WebChannel 通道中自动补全 Chrome / Firefox 伪装头。
+  - 优化 `/app` 页面获取请求头，补充真实的文档导航标头（`Upgrade-Insecure-Requests`, `Sec-Fetch-Dest: document`, `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Site: none`）。
+- **国际化与多语言同步 / UI & i18n Synchronization**:
+  - 为管理面板所有新增加的 OSID 提示、弹窗和警示文本完整提供中文、英文与西班牙语原生翻译。
+
 ## 4.31.0
 
 ### 新增与优化 / Features & Improvements

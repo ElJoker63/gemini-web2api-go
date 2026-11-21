@@ -441,8 +441,9 @@ const pages = {
                     : '<span class="badge ok">' + t('可用') + '</span>'
                 }</td>
                 <td class="nw" title="${LANG === 'es' ? 'Total ' + a.cookie_count + ' cookies, cookies clave: ' + (a.key_cookies||[]).join(' / ') : (LANG === 'en' ? 'Total ' + a.cookie_count + ' cookies, key items: ' + (a.key_cookies||[]).join(' / ') : '共 ' + a.cookie_count + ' 个 cookie，关键项：' + (a.key_cookies||[]).join(' / '))}">
-                  <span class="badge ${a.has_1psidts ? 'ok' : 'warn'}">${(a.key_cookies||[]).length}/9 ${t('项')}</span>
+                  <span class="badge ${a.has_1psidts && a.has_osid ? 'ok' : 'warn'}">${(a.key_cookies||[]).length}/10 ${t('项')}</span>
                   ${a.has_1psidts ? '' : '<span class="badge warn" title="' + t('缺 __Secure-1PSIDTS，首次保活会尝试补发；失败请用 Firefox 重新导出') + '">' + t('缺 TS') + '</span>'}
+                  ${a.has_osid ? '' : '<span class="badge warn" title="' + t('缺 OSID：gemini.google.com 现在要求这一项，缺了会被跳去登录页。请在 gemini.google.com 页面重新导出') + '">' + t('缺 OSID') + '</span>'}
                 </td>
                 <td class="pre nw">${a.sapisid_tail ? '…' + escapeHtml(a.sapisid_tail) : '—'}</td>
                 <td class="num nw">${a.fail_count > 0 ? '<span class="badge fail">' + a.fail_count + '</span>' : 0}</td>
@@ -1038,6 +1039,7 @@ const COOKIE_KEYS = [
   { k: 'SAPISID', req: true, hint: '算授权头用，缺了会被当匿名' },
   { k: '__Secure-1PSIDTS', hint: '约 30 分钟过期，保活会自动换发' },
   { k: 'SID' }, { k: 'HSID' }, { k: 'SSID' }, { k: 'APISID' },
+  { k: 'OSID', hint: 'gemini.google.com 自己的登录 cookie，缺了会被跳去登录页' },
 ];
 
 function parseCookieStr(s) {
@@ -1172,6 +1174,15 @@ async function addCookieAcct() {
     },
   });
   if (!data) return;
+  // 只提醒不拦：OSID 2026-11 才变成必需，判据只来自一个号的实测，硬拦可能挡掉能用的号。
+  if (!/(^|;\s*)OSID=/.test(data.cookie)) {
+    const go = await modalConfirm({
+      title: t('缺 OSID'),
+      desc: t('这串 cookie 里没有 OSID。gemini.google.com 现在要求这一项，缺了请求会被跳去登录页。请在已登录的 gemini.google.com 页面重新导出（F12 → 网络 → 任一发往 gemini.google.com 的请求 → 复制为 cURL）。'),
+      confirmText: t('仍然导入'),
+    });
+    if (!go) return;
+  }
   const r = await fetch('api/cookies', {
     method: 'POST', credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
