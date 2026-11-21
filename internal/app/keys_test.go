@@ -163,14 +163,15 @@ func TestConversationKeysAreScoped(t *testing.T) {
 		{"role": "assistant", "content": "hi"},
 		{"role": "user", "content": "again"},
 	}
-	if convParentKey(msgs, 1) == convParentKey(msgs, 2) {
-		t.Fatal("parent key must include API key id")
+	mc1 := ModelConfig{KeyID: 1}
+	mc2 := ModelConfig{KeyID: 2}
+	keys1 := convPrefixKeys(msgs, convScopeKey(mc1, nil, nil, "scope-1"), false)
+	keys2 := convPrefixKeys(msgs, convScopeKey(mc2, nil, nil, "scope-2"), false)
+	if len(keys1) == 0 || len(keys2) == 0 {
+		t.Fatal("prefix keys should not be empty")
 	}
-	if convChildKey(msgs, "answer", 1) == convChildKey(msgs, "answer", 2) {
-		t.Fatal("child key must include API key id")
-	}
-	if convParentKey(msgs, 1) == "" {
-		t.Fatal("parent key should not be empty")
+	if keys1[len(keys1)-1] == keys2[len(keys2)-1] {
+		t.Fatal("prefix keys must differ across different scopes/keys")
 	}
 }
 

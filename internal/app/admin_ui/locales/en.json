@@ -282,6 +282,8 @@
   "新增 Key": "New key",
   "新的 API Key": "New API Key",
   "无可用代理时退回直连": "Fall back to direct when no proxy is available",
+  "账号严格绑定出口": "Strict account proxy binding",
+  "每个号第一次用到哪个代理就绑定哪个。关：绑定的代理满了或在熔断冷却时换别的出口并重新绑定，可用性优先（默认）。开：这时只换号、不换出口，号都出不去就返回 429；同一个号始终从同一个 IP 出去。代理被删除或手动禁用时仍会重新绑定。在 Cookie 池里可以手动指定绑定": "Binds each account strictly to its first used proxy. Off: switches to another proxy when the bound proxy is saturated or in cooldown, prioritizing availability (default). On: only switches accounts, never the exit IP; returns 429 if no account is usable. The same account always uses the same IP. Can also be manually bound in the Cookie Pool.",
   "无法连接": "Cannot connect",
   "旧 Key 立即失效，所有使用它的客户端都要更换。确定继续？": "The old Key will be invalidated immediately. All clients must update. Continue?",
   "时间": "Time",

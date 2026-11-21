@@ -318,13 +318,18 @@ type StreamResult struct {
 type RateLimitError struct {
 	Reason  string // "concurrent" / "rpm" / "rph"
 	ProxyID int64  // 0 = 直连 slot 满
+	// Bound：strict_proxy_binding 开着，账号绑定的那个出口（ProxyID）用不上，没换到别的出口。
+	Bound bool
 }
 
 func (e *RateLimitError) Error() string {
+	if e.Bound {
+		return fmt.Sprintf("account's bound proxy #%d unavailable (%s) and strict_proxy_binding is on", e.ProxyID, e.Reason)
+	}
 	if e.ProxyID == 0 {
 		return "direct IP slot full: " + e.Reason + " limit reached (configure proxies to scale)"
 	}
-	return "all proxy slots full: " + e.Reason + " limit reached"
+	return fmt.Sprintf("proxy #%d slot full: %s limit reached (configure more proxies to scale)", e.ProxyID, e.Reason)
 }
 
 // acquireSlot 选一个有容量的 slot 给本次请求用。
@@ -404,6 +409,16 @@ func acquireSlotFor(accountID, preferProxyID, requireProxyID int64) (Proxy, bool
 	proxyMu.RUnlock()
 
 	if hasProxies {
+		if preferProxyID > 0 && requireProxyID == 0 && rtCfg().StrictProxyBinding {
+			// 严格绑定：只认这个号绑的出口，满了/冷却中就报错让调用方换号，不换 IP。
+			// 绑定已失效（代理删了或手动禁用）时往下照常轮询，调用方会重绑。
+			if p, ok, reason, bound := pickBoundProxy(preferProxyID); bound {
+				if ok {
+					return p, true, nil
+				}
+				return Proxy{}, false, &RateLimitError{Reason: reason, ProxyID: preferProxyID, Bound: true}
+			}
+		}
 		if p, ok, reason := pickProxyFor(preferProxyID, accountID, requireProxyID); ok {
 			return p, true, nil
 		} else if requireProxyID > 0 {
@@ -656,6 +671,28 @@ func streamGenerateOnce(ctx context.Context, prompt string, pc promptCtx, mc Mod
 	// 通过限流器拿一个 slot（代理或直连）。独占账号只能拿绑定出口，拿不到就
 	// 直接返回 AccountUnavailableError，绝不回退到别的 IP/直连。
 	p, slotOK, slotErr := acquireSlotForAccount(acct)
+	// strict_proxy_binding：这个号绑的出口用不上，就换一个号（它有自己的出口），不换 IP。
+	// 换不到号就报绑定出口不可用（429），不能落到 pickAccountForModel 的「全池降级」那个错。
+	var bindErr *RateLimitError
+	if !slotOK && acct != nil && mc.PinAccountID == 0 && errors.As(slotErr, &bindErr) && bindErr.Bound {
+		busy := map[int64]bool{}
+		for id := range skip {
+			busy[id] = true
+		}
+		for !slotOK && errors.As(slotErr, &bindErr) && bindErr.Bound {
+			busy[acct.ID] = true
+			next, ok := pickCookieAccountExcept(busy)
+			if !ok {
+				break
+			}
+			acct = next
+			p, slotOK, slotErr = acquireSlotForAccount(acct)
+		}
+		skip = busy
+		if acct != nil {
+			cookieID, cookieLabel = acct.ID, accountDisplayName(acct)
+		}
+	}
 	if !slotOK {
 		// 没有真正拿到 slot，只是把出口归属带进失败记录；不要 release。
 		if aue, ok := slotErr.(*AccountUnavailableError); ok {
@@ -739,6 +776,11 @@ func streamGenerateOnce(ctx context.Context, prompt string, pc promptCtx, mc Mod
 			next[id] = true
 		}
 		nextAcct, _ := pickCookieAccountFiltered(next, mc.AllowedAccounts)
+		// 严格绑定：出口已经定了，绑在别的出口上的号不能借用这个出口。
+		for nextAcct != nil && strictBoundElsewhere(nextAcct, picked.ID) {
+			next[nextAcct.ID] = true
+			nextAcct, _ = pickCookieAccountFiltered(next, mc.AllowedAccounts)
+		}
 		if nextAcct == nil {
 			break
 		}

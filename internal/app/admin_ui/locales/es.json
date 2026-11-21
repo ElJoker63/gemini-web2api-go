@@ -282,6 +282,8 @@
   "新增 Key": "Nueva Key",
   "新的 API Key": "Nueva API Key",
   "无可用代理时退回直连": "Fallback a conexión directa si no hay proxies",
+  "账号严格绑定出口": "Vinculación estricta de cuenta a proxy",
+  "每个号第一次用到哪个代理就绑定哪个。关：绑定的代理满了或在熔断冷却时换别的出口并重新绑定，可用性优先（默认）。开：这时只换号、不换出口，号都出不去就返回 429；同一个号始终从同一个 IP 出去。代理被删除或手动禁用时仍会重新绑定。在 Cookie 池里可以手动指定绑定": "Asocia rígidamente cada cuenta al primer proxy que use. Si se desactiva: cuando el proxy asignado está lleno o en enfriamiento, se reasigna a otro proxy disponible para priorizar la disponibilidad (predeterminado). Si se activa: solo cambia de cuenta manteniendo el proxy; si ningún slot está disponible devuelve 429. Una misma cuenta siempre saldrá por la misma IP. En el pool de cookies se puede fijar manualmente.",
   "无法连接": "No se puede conectar",
   "旧 Key 立即失效，所有使用它的客户端都要更换。确定继续？": "La Key anterior quedará invalidada de inmediato y todos los clientes deberán actualizarla. ¿Deseas continuar?",
   "时间": "Hora",

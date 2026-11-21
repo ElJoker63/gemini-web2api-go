@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const Version = "4.31.1"
+const Version = "4.32.0"
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	body, _ := json.Marshal(data)
@@ -319,7 +319,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	var res *StreamResult
 	if rtCfg().MultiTurn && len(images) == 0 && modelCfg.Tool == 0 {
 		// 多轮：按历史前缀识别续接，命中就只发新消息、历史留服务端。带 tools 也走这条。
-		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning)
+		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, onReasoning, conversationOptions{ctx: r.Context(), requestScope: conversationRequestScope(r, getStr(req, "prompt_cache_key"), getStr(req, "user"))})
 	} else {
 		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, onReasoning)
 	}
@@ -451,20 +451,6 @@ func usageOf(prompt, text string, res *StreamResult) map[string]int {
 	return buildUsageWithReasoning(prompt, text, r, false)
 }
 
-// responsesConversationPromptFits reports whether the conversation path can
-// send this request as-is. Its first turn embeds the complete logical history,
-// so it must respect the same byte limit as the normal path. Once a parent
-// conversation is known, callGeminiConv sends only the newest message and can
-// safely continue even when the reconstructed history is large.
-func responsesConversationPromptFits(messages []map[string]interface{}, prompt string, keyID int64) bool {
-	budget := rtCfg().MaxPromptBytes
-	if budget <= 0 || len([]byte(prompt)) <= budget {
-		return true
-	}
-	st, _ := convFind(messages, keyID, "")
-	return st != nil
-}
-
 // remainingText 返回最终文本里还没通过 onDelta 发出去的部分。
 // 真流式下通常只剩末尾一点或为空；没走真流式时 Emitted 为空，返回全文。
 func remainingText(text string, res *StreamResult) string {
@@ -526,87 +512,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var messages []map[string]interface{}
-	if instr := getStr(req, "instructions"); instr != "" {
-		messages = append(messages, map[string]interface{}{"role": "system", "content": instr})
-	}
-
-	switch input := req["input"].(type) {
-	case string:
-		messages = append(messages, map[string]interface{}{"role": "user", "content": input})
-	case []interface{}:
-		for _, raw := range input {
-			switch item := raw.(type) {
-			case string:
-				messages = append(messages, map[string]interface{}{"role": "user", "content": item})
-			case map[string]interface{}:
-				if t := getStr(item, "type"); t == "function_call_output" {
-					messages = append(messages, map[string]interface{}{
-						"role":         "tool",
-						"tool_call_id": getStr(item, "call_id"),
-						"name":         getStr(item, "name"),
-						"content":      getStr(item, "output"),
-					})
-					continue
-				}
-				role := getStr(item, "role")
-				if role == "assistant" || (getStr(item, "type") == "message" && role == "assistant") {
-					var textAcc strings.Builder
-					var tcList []map[string]interface{}
-					if cp, ok := item["content"].([]interface{}); ok {
-						for _, c := range cp {
-							cm, ok := c.(map[string]interface{})
-							if !ok {
-								continue
-							}
-							switch getStr(cm, "type") {
-							case "output_text":
-								textAcc.WriteString(getStr(cm, "text"))
-							case "function_call":
-								tcList = append(tcList, cm)
-							}
-						}
-					} else if s, ok := item["content"].(string); ok {
-						textAcc.WriteString(s)
-					}
-					m := map[string]interface{}{"role": "assistant", "content": textAcc.String()}
-					if len(tcList) > 0 {
-						var tcs []map[string]interface{}
-						for i, tc := range tcList {
-							id := getStr(tc, "call_id")
-							if id == "" {
-								id = fmt.Sprintf("call_%d", i)
-							}
-							tcs = append(tcs, map[string]interface{}{
-								"id":   id,
-								"type": "function",
-								"function": map[string]interface{}{
-									"name":      getStr(tc, "name"),
-									"arguments": getStr(tc, "arguments"),
-								},
-							})
-						}
-						m["tool_calls"] = tcs
-					}
-					messages = append(messages, m)
-				} else {
-					if role == "" {
-						role = "user"
-					}
-					content := contentToString(item["content"])
-					messages = append(messages, map[string]interface{}{"role": role, "content": content})
-				}
-			}
-		}
-	}
-
-	previousResponseID := getStr(req, "previous_response_id")
-	// Claude Code often sends only the new input after previous_response_id.
-	// Rebuild the logical history before hashing it for conversation.go; a full
-	// history resend remains supported and is detected without duplication.
-	if previous := responseHistoryGet(previousResponseID); previous != nil {
-		messages = mergeResponseHistory(previous, messages)
-	}
+	messages := responsesToMessages(req)
 
 	toolsRaw, _ := req["tools"].([]interface{})
 	var tools []map[string]interface{}
@@ -745,14 +651,8 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	var text string
 	var toolCalls []ToolCall
 	var res *StreamResult
-	conversationRequested := rtCfg().MultiTurn || rtCfg().TemporaryChat || previousResponseID != ""
-	useConversation := conversationRequested && len(images) == 0 && modelCfg.Tool == 0 &&
-		responsesConversationPromptFits(messages, prompt, modelCfg.KeyID)
-	if conversationRequested && !useConversation && len(images) == 0 && modelCfg.Tool == 0 {
-		logf("[conv] prompt %d 字节超过上限 %d，首轮回退普通 Responses 路径（文本附件）", len([]byte(prompt)), rtCfg().MaxPromptBytes)
-	}
-	if useConversation {
-		text, toolCalls, res, err = callGeminiConv(r.Context(), messages, modelCfg, tools, req["tool_choice"], onDelta, nil, previousResponseID)
+	if rtCfg().MultiTurn && len(images) == 0 && modelCfg.Tool == 0 {
+		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, nil, conversationOptions{ctx: r.Context(), requestScope: conversationRequestScope(r, getStr(req, "prompt_cache_key"), getStr(req, "user"))})
 	} else {
 		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, nil)
 	}
@@ -852,10 +752,6 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordRequest("responses", modelName, prompt, text, res, 200, "", stream)
-	// Store every successful Responses turn. This lets a later previous_response_id
-	// reconstruct context even when an oversized first turn used the attachment
-	// fallback instead of the Gemini native conversation path.
-	responseHistoryPut(rid, messages, text, toolCalls)
 	if stream {
 		// 补上闸门扣住、或前缀 diff 跳过的尾巴，再发终态事件。
 		if rest := remainingOf(text, sentText(res, gate)); rest != "" {
