@@ -3,6 +3,7 @@ const ICONS = {
   dashboard: '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/>',
   playground: '<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>',
   requests: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  logs: '<path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>',
   proxies: '<circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.5 3 4 6 4 9.5s-1.5 6.5-4 9.5c-2.5-3-4-6-4-9.5s1.5-6.5 4-9.5z"/>',
   cookies: '<path d="M12 21.5a9.5 9.5 0 10-9.5-9.5c0 .3.02.6.05.9 1.45.2 2.65 1.15 3.1 2.5.4 1.25 1.45 2.15 2.75 2.3.35 1.55 1.5 2.8 3.05 3.3.15.35.35.45.55.5z"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="9.5" r="1" fill="currentColor"/><circle cx="13" cy="14" r="1" fill="currentColor"/><circle cx="8" cy="14" r="1" fill="currentColor"/>',
   keys: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L20 3m-3 3l2 2m-4 1l2 2"/>',

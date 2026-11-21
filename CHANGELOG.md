@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.32.1
+
+### 新增 / Features
+
+- **管理面板增加系统日志查看与内存环形日志 REST API（#95，感谢 @Shakya47）**：
+  - 内置 1000 行固定容量的高性能内存环形队列（`LogRingBuffer`），并发读写安全，零磁盘 I/O 磨损。
+  - 自动归类日志来源模块（`cookie`、`rotate`、`context`、`bl`、`proxy`、`scheduler` 等）与日志等级（`INFO`、`WARN`、`ERROR`）。
+  - 管理面板新增「系统日志」标签页，支持 2 秒自动实时轮询刷新、按模块/级别多维过滤、关键词全文搜索、一键复制纯文本日志以及清空缓冲。
+  - 提供标准 REST API 接口（`GET /admin/api/logs?format=text|json&tail=100` 与 `DELETE /admin/api/logs`），方便运维脚本与外部 Agent 诊断排查。
+  - 完整支持中文、英文和西班牙语（`es.json` / `en.json` / `zh.json`）三语国际化与自适应主题。
+
 ## 4.32.0
 
 ### 新增 / Features

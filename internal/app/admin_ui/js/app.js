@@ -337,6 +337,52 @@ const pages = {
     `;
   },
 
+  logs: async () => {
+    return `
+      <div class="panel page-fill">
+        <h2>${t('系统日志')}
+          <span class="controls">
+            <select id="logSource">
+              <option value="">${t('全部模块')}</option>
+              <option value="cookie">${t('Cookie 账号 (Cookie)')}</option>
+              <option value="rotate">${t('会话保活 (Rotate)')}</option>
+              <option value="context">${t('上下文附件 (Context)')}</option>
+              <option value="bl">${t('版本与指纹 (Protocol / BL)')}</option>
+              <option value="proxy">${t('代理池 (Proxy)')}</option>
+              <option value="general">${t('其他通用 (General)')}</option>
+            </select>
+            <select id="logLevel">
+              <option value="">${t('全部级别')}</option>
+              <option value="ERROR">${t('错误 (ERROR)')}</option>
+              <option value="WARN">${t('警告 (WARN)')}</option>
+              <option value="INFO">${t('信息 (INFO)')}</option>
+            </select>
+            <select id="logTail">
+              <option value="50">${t('最新 50 行')}</option>
+              <option value="100" selected>${t('最新 100 行')}</option>
+              <option value="250">${t('最新 250 行')}</option>
+              <option value="500">${t('最新 500 行')}</option>
+            </select>
+            <input type="text" id="logSearch" placeholder="${t('搜索关键词...')}" style="width:130px;padding:6px 10px;">
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--text);cursor:pointer;">
+              <input type="checkbox" id="logAutoRefresh" checked> ${t('自动刷新 (2s)')}
+            </label>
+            <button class="btn" onclick="loadLogs()">${t('刷新')}</button>
+            <button class="btn muted" onclick="copyLogText()">${t('复制日志')}</button>
+            <button class="btn muted" onclick="clearLogBuffer()">${t('清空缓冲')}</button>
+          </span>
+        </h2>
+        <div id="logStatsBanner" style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+          <span id="logSummaryText">${t('正在加载日志...')}</span>
+          <span style="font-family:var(--mono);">REST API: <code>GET /admin/api/logs?format=text&tail=100</code></span>
+        </div>
+        <div id="logContainer" style="background:#13151a;color:#e2e8f0;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:1.6;border-radius:10px;padding:12px 14px;flex:1;min-height:0;overflow-y:auto;box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);">
+          <div class="empty" style="color:#64748b;">${t('正在加载日志...')}</div>
+        </div>
+      </div>
+    `;
+  },
+
   proxies: async () => {
     const data = await api('api/proxies');
     return `
@@ -779,6 +825,115 @@ async function loadReqs() {
       opt.value = m; opt.text = m; sel.appendChild(opt);
     });
   }
+}
+
+async function loadLogs(isBackground = false) {
+  const box = document.getElementById('logContainer');
+  if (!box) return;
+  const source = document.getElementById('logSource')?.value || '';
+  const level = document.getElementById('logLevel')?.value || '';
+  const tail = document.getElementById('logTail')?.value || '100';
+  const q = document.getElementById('logSearch')?.value || '';
+
+  const params = new URLSearchParams();
+  if (tail) params.set('tail', tail);
+  if (source) params.set('source', source);
+  if (level) params.set('level', level);
+  if (q) params.set('q', q);
+
+  try {
+    const res = await api('api/logs?' + params.toString());
+    const items = res.items || [];
+    const summary = document.getElementById('logSummaryText');
+    if (summary) {
+      if (LANG === 'es') {
+        summary.textContent = `Mostrando ${items.length} líneas (Total: ${res.total || items.length})`;
+      } else if (LANG === 'en') {
+        summary.textContent = `Showing ${items.length} entries (Total: ${res.total || items.length})`;
+      } else {
+        summary.textContent = `当前显示 ${items.length} 条记录（总计缓冲 ${res.total || items.length} 条）`;
+      }
+    }
+
+    if (items.length === 0) {
+      box.innerHTML = `<div class="empty" style="color:#64748b;">${t('暂无匹配的日志记录')}</div>`;
+      return;
+    }
+
+    const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+
+    box.innerHTML = items.map(item => {
+      let levelBadge = '';
+      let msgColor = '#cbd5e1';
+      if (item.level === 'ERROR') {
+        levelBadge = '<span style="background:#ef4444;color:#fff;font-weight:600;padding:1px 5px;border-radius:4px;font-size:11px;margin-right:4px;">ERROR</span>';
+        msgColor = '#fca5a5';
+      } else if (item.level === 'WARN') {
+        levelBadge = '<span style="background:#f59e0b;color:#000;font-weight:600;padding:1px 5px;border-radius:4px;font-size:11px;margin-right:4px;">WARN</span>';
+        msgColor = '#fde68a';
+      }
+
+      let tagBg = '#334155';
+      let tagFg = '#94a3b8';
+      switch (item.source) {
+        case 'cookie': tagBg = '#1e3a8a'; tagFg = '#93c5fd'; break;
+        case 'rotate': tagBg = '#065f46'; tagFg = '#6ee7b7'; break;
+        case 'context': tagBg = '#4c1d95'; tagFg = '#c4b5fd'; break;
+        case 'bl': tagBg = '#701a75'; tagFg = '#f0abfc'; break;
+        case 'proxy': tagBg = '#831843'; tagFg = '#fbcfe8'; break;
+        case 'scheduler': tagBg = '#14532d'; tagFg = '#86efac'; break;
+      }
+
+      return `<div style="padding:2px 0;display:flex;align-items:flex-start;gap:6px;word-break:break-all;">
+        <span style="color:#64748b;flex:none;white-space:nowrap;">[${escapeHtml(item.time)}]</span>
+        <span style="background:${tagBg};color:${tagFg};padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap;">[${escapeHtml(item.source)}]</span>
+        ${levelBadge}
+        <span style="color:${msgColor};overflow-wrap:anywhere;flex:1;">${escapeHtml(item.message)}</span>
+      </div>`;
+    }).join('');
+
+    if (wasAtBottom || !isBackground) {
+      box.scrollTop = box.scrollHeight;
+    }
+  } catch (e) {
+    if (!isBackground) {
+      box.innerHTML = `<div class="err">${t('加载日志失败：')}${escapeHtml(e.message)}</div>`;
+    }
+  }
+}
+
+async function copyLogText() {
+  const source = document.getElementById('logSource')?.value || '';
+  const level = document.getElementById('logLevel')?.value || '';
+  const tail = document.getElementById('logTail')?.value || '100';
+  const q = document.getElementById('logSearch')?.value || '';
+
+  const params = new URLSearchParams({ format: 'text' });
+  if (tail) params.set('tail', tail);
+  if (source) params.set('source', source);
+  if (level) params.set('level', level);
+  if (q) params.set('q', q);
+
+  try {
+    const res = await fetch('api/logs?' + params.toString());
+    const text = await res.text();
+    await copyText(text);
+  } catch (e) {
+    flash(t('复制失败: ') + e.message);
+  }
+}
+
+async function clearLogBuffer() {
+  const ok = await modalConfirm({
+    title: t('清空日志缓冲'),
+    desc: t('确定要清空内存中的系统日志吗？这不会影响服务运行。'),
+    confirmText: t('清空'),
+    danger: true,
+  });
+  if (!ok) return;
+  await api('api/logs', { method: 'DELETE' });
+  flash(t('日志缓冲已清空'));
+  await loadLogs();
 }
 
 // ── 运行时配置 ───────────────────────────────────────────────────────────────
@@ -1789,6 +1944,32 @@ async function switchPage(name, force = false) {
   if (name === 'settings') {
     await loadRtCfg();
   }
+  if (name === 'logs') {
+    document.getElementById('logSource').onchange = () => loadLogs();
+    document.getElementById('logLevel').onchange = () => loadLogs();
+    document.getElementById('logTail').onchange = () => loadLogs();
+    document.getElementById('logSearch').oninput = () => {
+      clearTimeout(window.logSearchDebounce);
+      window.logSearchDebounce = setTimeout(() => loadLogs(), 300);
+    };
+    await loadLogs();
+    if (window.logTimer) clearInterval(window.logTimer);
+    window.logTimer = setInterval(() => {
+      if (currentPage === 'logs') {
+        const auto = document.getElementById('logAutoRefresh');
+        if (auto && auto.checked) {
+          loadLogs(true);
+        }
+      } else {
+        clearInterval(window.logTimer);
+      }
+    }, 2000);
+  } else {
+    if (window.logTimer) {
+      clearInterval(window.logTimer);
+      window.logTimer = null;
+    }
+  }
 }
 
 function refreshPage() { return switchPage(currentPage, true); }
@@ -1797,6 +1978,7 @@ const NAV = [
   ['dashboard', '概览'],
   ['playground', 'Playground'],
   ['requests', '请求记录'],
+  ['logs', '系统日志'],
   ['proxies', '代理池'],
   ['cookies', 'Cookie 池'],
   ['keys', 'API Keys'],
@@ -1804,7 +1986,7 @@ const NAV = [
   ['about', '关于'],
 ];
 const PAGE_TITLES = {
-  dashboard: '概览', playground: 'Playground', requests: '请求记录', proxies: '代理池', cookies: 'Cookie 池',
+  dashboard: '概览', playground: 'Playground', requests: '请求记录', logs: '系统日志', proxies: '代理池', cookies: 'Cookie 池',
   keys: 'API Keys', settings: '设置',
   about: '关于',
 };
