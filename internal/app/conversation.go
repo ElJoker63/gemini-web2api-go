@@ -561,6 +561,11 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 		logf("[conv] 新会话，首轮发 %d 字节（tools=%d）", len(prompt), len(tools))
 	} else {
 		prompt = buildPrompt(messages[prefixLen:], nil, nil)
+		if len(tools) > 0 {
+			if reminder := toolContinuationReminder(tools, toolChoice); reminder != "" {
+				prompt += "\n\n" + reminder
+			}
+		}
 		logf("[conv] 续接命中 turn=%d，只发 %d 字节（新增 %d 条消息，历史留服务端）", conv.turn, len(prompt), len(messages)-prefixLen)
 	}
 
