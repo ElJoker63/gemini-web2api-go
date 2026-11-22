@@ -578,5 +578,8 @@
   "日志缓冲已清空": "日志缓冲已清空",
   "暂无匹配的日志记录": "暂无匹配的日志记录",
   "正在加载日志...": "正在加载日志...",
-  "加载日志失败：": "加载日志失败："
+  "加载日志失败：": "加载日志失败：",
+  "从文件读取": "从文件读取",
+  "在已登录的 <code>https://gemini.google.com</code> 页面用 Cookie-Editor 之类的扩展 <b>Export → JSON</b>，整段粘到下面即可。": "在已登录的 <code>https://gemini.google.com</code> 页面用 Cookie-Editor 之类的扩展 <b>Export → JSON</b>，整段粘到下面即可。",
+  "不是 gemini.google.com 的项（youtube.com、accounts.google.com 等）会自动丢掉。 也认 <code>{\"SID\": \"...\", ...}</code> 对象、Playwright storageState、DevTools「复制为 cURL」和普通的 <code>k=v; k=v</code> 串。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。": "不是 gemini.google.com 的项（youtube.com、accounts.google.com 等）会自动丢掉。 也认 <code>{\"SID\": \"...\", ...}</code> 对象、Playwright storageState、DevTools「复制为 cURL」和普通的 <code>k=v; k=v</code> 串。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。"
 }

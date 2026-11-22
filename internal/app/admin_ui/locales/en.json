@@ -578,5 +578,8 @@
   "日志缓冲已清空": "Log buffer cleared",
   "暂无匹配的日志记录": "No matching log entries",
   "正在加载日志...": "Loading logs...",
-  "加载日志失败：": "Failed to load logs: "
+  "加载日志失败：": "Failed to load logs: ",
+  "从文件读取": "Load from file",
+  "在已登录的 <code>https://gemini.google.com</code> 页面用 Cookie-Editor 之类的扩展 <b>Export → JSON</b>，整段粘到下面即可。": "On a signed-in <code>https://gemini.google.com</code> page, use an extension such as Cookie-Editor to <b>Export → JSON</b> and paste the whole thing below.",
+  "不是 gemini.google.com 的项（youtube.com、accounts.google.com 等）会自动丢掉。 也认 <code>{\"SID\": \"...\", ...}</code> 对象、Playwright storageState、DevTools「复制为 cURL」和普通的 <code>k=v; k=v</code> 串。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。": "Entries not sent to gemini.google.com (youtube.com, accounts.google.com, …) are dropped automatically. Also accepts a <code>{\"SID\": \"...\", ...}</code> object, Playwright storageState, DevTools \"Copy as cURL\" and a plain <code>k=v; k=v</code> string. Prefer exporting from Firefox (recent Chrome binds the session to the device and it will not renew)."
 }

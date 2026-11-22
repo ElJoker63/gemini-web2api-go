@@ -1192,12 +1192,14 @@ async function resetProxy(id) {
 
 // Cookie 池 ────────────────────────────────────────────────────────────────
 const COOKIE_KEYS = [
-  { k: '__Secure-1PSID', hint: '主会话' },
-  { k: 'SAPISID', req: true, hint: '算授权头用，缺了会被当匿名' },
-  { k: '__Secure-1PSIDTS', hint: '约 30 分钟过期，保活会自动换发' },
-  { k: 'SID' }, { k: 'HSID' }, { k: 'SSID' }, { k: 'APISID' },
-  { k: 'OSID', hint: 'gemini.google.com 自己的登录 cookie，缺了会被跳去登录页' },
+  { k: 'SAPISID', req: true },
+  { k: '__Secure-1PSID' },
+  { k: '__Secure-1PSIDTS' },
+  { k: 'OSID' },
 ];
+
+const COOKIE_TEMPLATE_ORDER = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', '__Secure-1PSID', '__Secure-1PSIDTS', 'OSID'];
+const COOKIE_TARGET_HOST = 'gemini.google.com';
 
 function parseCookieStr(s) {
   const out = {};
@@ -1209,18 +1211,79 @@ function parseCookieStr(s) {
   return out;
 }
 
-function joinCookieObj(obj) {
-  return Object.entries(obj).filter(([, v]) => (v || '').trim())
-    .map(([k, v]) => `${k}=${String(v).trim()}`).join('; ');
+function cookieDomainMatches(domain) {
+  const d = String(domain || '').trim().replace(/^\./, '').toLowerCase();
+  return !d || d === COOKIE_TARGET_HOST || COOKIE_TARGET_HOST.endsWith('.' + d);
 }
 
-async function addCookieAcct() {
-  let extras = {};
+function joinCookieEntries(arr) {
+  const order = [], byName = {};
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue;
+    const name = String(e.name ?? '').trim();
+    const val = String(e.value ?? '').trim();
+    if (!name || !val || !cookieDomainMatches(e.domain)) continue;
+    const dl = String(e.domain || '').trim().replace(/^\./, '').length;
+    if (name in byName) {
+      if (dl > byName[name].dl) byName[name] = { val, dl };
+      continue;
+    }
+    order.push(name);
+    byName[name] = { val, dl };
+  }
+  return order.map(n => `${n}=${byName[n].val}`).join('; ');
+}
 
+function joinCookieMap(m) {
+  const str = k => (typeof m[k] === 'string' ? m[k].trim() : '');
+  const parts = [];
+  COOKIE_TEMPLATE_ORDER.forEach(k => { if (str(k)) parts.push(`${k}=${str(k)}`); });
+  Object.keys(m).filter(k => !COOKIE_TEMPLATE_ORDER.includes(k) && k !== 'sapisid' && str(k))
+    .sort().forEach(k => parts.push(`${k}=${str(k)}`));
+  return parts.join('; ');
+}
+
+function parseCookieInput(text) {
+  let s = String(text || '').trim();
+  if (!s) return { cookie: '', kind: '' };
+
+  if (s[0] === '[' || s[0] === '{') {
+    let v;
+    try { v = JSON.parse(s); } catch (e) {
+      return { error: (LANG === 'es' ? 'JSON inválido: ' : (LANG === 'en' ? 'Invalid JSON: ' : 'JSON 格式不对：')) + e.message };
+    }
+    if (Array.isArray(v)) return { cookie: joinCookieEntries(v), kind: 'json-array' };
+    if (v && Array.isArray(v.cookies)) return { cookie: joinCookieEntries(v.cookies), kind: 'storage-state' };
+    if (v && typeof v.cookie === 'string' && v.cookie.trim()) return { cookie: v.cookie.trim(), kind: 'json-cookie' };
+    if (v && typeof v === 'object') return { cookie: joinCookieMap(v), kind: 'json-map' };
+    return { error: LANG === 'es' ? 'Estructura JSON no reconocida' : (LANG === 'en' ? 'Unrecognized JSON shape' : '认不出这段 JSON 的结构') };
+  }
+
+  if (/^curl\s/i.test(s)) {
+    const m = s.match(/(?:-b|--cookie)\s+(['"])([\s\S]*?)\1/) ||
+              s.match(/-H\s+(['"])cookie:\s*([\s\S]*?)\1/i);
+    if (!m) return { error: LANG === 'es' ? 'No se encontró cookie en este comando cURL' : (LANG === 'en' ? 'No cookie found in this cURL command' : '这段 cURL 里没找到 cookie') };
+    return { cookie: m[2].trim(), kind: 'curl' };
+  }
+
+  s = s.replace(/^cookie:\s*/i, '');
+  return { cookie: Object.keys(parseCookieStr(s)).length ? s : '', kind: 'string' };
+}
+
+const COOKIE_KIND_LABEL = {
+  'json-array': ['扩展导出的 JSON', 'extension JSON export', 'JSON exportado por extensión'],
+  'storage-state': ['Playwright storageState', 'Playwright storageState', 'Playwright storageState'],
+  'json-cookie': ['JSON（cookie 字段）', 'JSON (cookie field)', 'JSON (campo cookie)'],
+  'json-map': ['JSON 对象', 'JSON object', 'Objeto JSON'],
+  'curl': ['cURL 命令', 'cURL command', 'Comando cURL'],
+  'string': ['cookie 串', 'cookie string', 'Cadena de cookies'],
+};
+
+async function addCookieAcct() {
   const data = await buildModal({
     title: t('导入 Cookie'),
     wide: true,
-    desc: t('浏览器 F12 → Application → Cookies → 选 <code>https://gemini.google.com</code>。逐项抄或整串粘贴都行，两种填法可随时切换，已填的内容会带过去。'),
+    desc: t('在已登录的 <code>https://gemini.google.com</code> 页面用 Cookie-Editor 之类的扩展 <b>Export → JSON</b>，整段粘到下面即可。'),
     bodyHTML: `
       <div class="field">
         <label>${t('标签')}</label>
@@ -1234,30 +1297,14 @@ async function addCookieAcct() {
         <div class="hint">${t('浏览器里同时登了多个 Google 号才需要改：打开那个号的 Gemini，地址栏是 /u/1/ 就填 1，没有 /u/ 就是 0。同一串 cookie 想当几个号用，就导入几次、各填各的序号。')}</div>
       </div>
 
-      <div class="segbar" data-role="seg">
-        <button type="button" data-mode="raw" class="on">${t('整串粘贴（推荐）')}</button>
-        <button type="button" data-mode="fields">${t('逐项填写')}</button>
-      </div>
-
-      <div data-pane="fields" style="display:none;">
-        <div class="ck-grid">
-          ${COOKIE_KEYS.map(c => `
-            <div class="field${c.k.length > 12 ? ' wide' : ''}">
-              <label>${escapeHtml(c.k)}${c.req ? ' <span class="req">*</span>' : ''}</label>
-              <input data-ck="${escapeHtml(c.k)}" type="text" autocomplete="off" spellcheck="false"
-                     placeholder="${escapeHtml(t(c.hint || ''))}" />
-            </div>`).join('')}
-        </div>
-        <div class="ck-extra" data-role="extras"></div>
-        <div class="ck-extra">${t('前三项是同类项目实践里的最小可用集合，下面四项补齐更稳。 抓包实测浏览器每次实际会发 <b>20 多个</b> cookie，而我们把整串原样转发 （代码里只解析 SAPISID 用来算授权头），所以 <b>整串粘贴比逐项填更接近真实浏览器</b>；逐项模式适合手头只有零散几项时用。')}</div>
-      </div>
-
-      <div data-pane="raw">
-        <div class="field">
-          <textarea data-name="cookie" rows="6" spellcheck="false"
-            placeholder="SID=...; HSID=...; SSID=...; APISID=...; SAPISID=...; __Secure-1PSID=...; __Secure-1PSIDTS=..."></textarea>
-          <div class="hint">${t('整行粘贴，分号分隔。至少要含 SAPISID 和 __Secure-1PSID。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。DevTools 里全选复制即可， 多余的项会一并保留 —— 发得越全越像真实浏览器。')}</div>
-        </div>
+      <div class="field">
+        <label>Cookie JSON <span class="req">*</span>
+          <a href="#" data-role="pickfile" style="float:right;font-weight:normal;">${t('从文件读取')}</a></label>
+        <input type="file" data-role="file" accept=".json,.txt,application/json,text/plain" style="display:none;" />
+        <textarea data-name="cookie" rows="9" spellcheck="false" style="font-family:var(--mono);font-size:12px;"
+          placeholder='[{"domain": ".google.com", "name": "SAPISID", "value": "..."}, ...]'></textarea>
+        <div class="ck-extra" data-role="preview"></div>
+        <div class="hint">${t('不是 gemini.google.com 的项（youtube.com、accounts.google.com 等）会自动丢掉。 也认 <code>{"SID": "...", ...}</code> 对象、Playwright storageState、DevTools「复制为 cURL」和普通的 <code>k=v; k=v</code> 串。 建议用 Firefox 导出（Chrome 新版本的会话绑在设备上，续不了）。')}</div>
       </div>
 
       <div class="field" style="margin-top:14px;">
@@ -1266,67 +1313,54 @@ async function addCookieAcct() {
       </div>`,
     submitText: t('导入'),
     onReady: (overlay) => {
-      const $ = (s) => overlay.querySelector(s);
-      const inputs = () => [...overlay.querySelectorAll('[data-ck]')];
-      const ta = $('[data-name=cookie]');
+      const ta = overlay.querySelector('[data-name=cookie]');
+      const pv = overlay.querySelector('[data-role=preview]');
+      const fileIn = overlay.querySelector('[data-role=file]');
+      const en = LANG === 'en';
+      const es = LANG === 'es';
 
-      const fieldsToRaw = () => {
-        const obj = {};
-        inputs().forEach(el => { if (el.value.trim()) obj[el.dataset.ck] = el.value.trim(); });
-        ta.value = joinCookieObj({ ...obj, ...extras });
+      const render = () => {
+        const r = parseCookieInput(ta.value);
+        if (r.error) { pv.innerHTML = `<span style="color:var(--fail)">${escapeHtml(r.error)}</span>`; return; }
+        if (!r.kind) { pv.textContent = ''; return; }
+        const obj = parseCookieStr(r.cookie);
+        const n = Object.keys(obj).length;
+        if (!n) {
+          pv.innerHTML = `<span style="color:var(--fail)">${es
+            ? 'No se encontraron cookies para gemini.google.com'
+            : (en ? 'No cookies for gemini.google.com found' : '没认出发往 gemini.google.com 的 cookie')}</span>`;
+          return;
+        }
+        const labelIdx = es ? 2 : (en ? 1 : 0);
+        const kind = (COOKIE_KIND_LABEL[r.kind] || [])[labelIdx] || r.kind;
+        const checks = COOKIE_KEYS.map(c => obj[c.k]
+          ? `<span style="color:var(--ok)">✓ ${escapeHtml(c.k)}</span>`
+          : `<span style="color:${c.req ? 'var(--fail)' : 'var(--warn)'}">✗ ${escapeHtml(c.k)}</span>`).join(' &nbsp;');
+        pv.innerHTML = (es ? `Reconocido como ${escapeHtml(kind)}, ${n} elemento${n > 1 ? 's' : ''}: `
+                       : (en ? `Recognized ${escapeHtml(kind)}, ${n} cookie${n > 1 ? 's' : ''}: `
+                       : `识别为${escapeHtml(kind)}，共 ${n} 项：`)) + checks;
       };
-      const rawToFields = () => {
-        const obj = parseCookieStr(ta.value);
-        const known = new Set(COOKIE_KEYS.map(c => c.k));
-        extras = {};
-        Object.entries(obj).forEach(([k, v]) => { if (!known.has(k)) extras[k] = v; });
-        inputs().forEach(el => { el.value = obj[el.dataset.ck] || ''; });
-        const n = Object.keys(extras).length;
-        $('[data-role=extras]').textContent = n
-          ? (LANG === 'es'
-              ? `${n} elemento${n > 1 ? 's' : ''} adicional${n > 1 ? 'es' : ''} no listado${n > 1 ? 's' : ''} arriba (${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}) se conservarán.`
-              : (LANG === 'en'
-                  ? `${n} additional item${n > 1 ? 's' : ''} not listed above (${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}) will be kept.`
-                  : `另有 ${n} 项未在上面列出（${Object.keys(extras).slice(0, 4).join(', ')}${n > 4 ? ' …' : ''}），会一并保留。`))
-          : '';
-      };
+      ta.addEventListener('input', render);
 
-      overlay.querySelectorAll('[data-role=seg] button').forEach(btn => {
-        btn.onclick = () => {
-          const mode = btn.dataset.mode;
-          if (mode === 'raw') fieldsToRaw(); else rawToFields();
-          overlay.querySelectorAll('[data-role=seg] button')
-            .forEach(b => b.classList.toggle('on', b === btn));
-          $('[data-pane=fields]').style.display = mode === 'fields' ? '' : 'none';
-          $('[data-pane=raw]').style.display = mode === 'raw' ? '' : 'none';
-        };
-      });
-      inputs().forEach(el => el.addEventListener('paste', (ev) => {
-        const txt = (ev.clipboardData || window.clipboardData).getData('text') || '';
-        if (!txt.includes(';') || !txt.includes('=')) return;
-        ev.preventDefault();
-        ta.value = txt.trim();
-        rawToFields();
-      }));
+      overlay.querySelector('[data-role=pickfile]').onclick = (ev) => { ev.preventDefault(); fileIn.click(); };
+      fileIn.onchange = async () => {
+        const f = fileIn.files && fileIn.files[0];
+        if (!f) return;
+        ta.value = (await f.text()).trim();
+        fileIn.value = '';
+        render();
+      };
     },
     onSubmit: (overlay) => {
       const label = (overlay.querySelector('[data-name=label]').value || '').trim();
       const note = (overlay.querySelector('[data-name=note]').value || '').trim();
       const authuser = parseAuthUser(overlay.querySelector('[data-name=authuser]').value);
       if (authuser === null) return { error: t('账号序号要填 0 到 9 的整数') };
-      const isRaw = overlay.querySelector('[data-role=seg] button.on').dataset.mode === 'raw';
-      let cookie;
-      if (isRaw) {
-        cookie = (overlay.querySelector('[data-name=cookie]').value || '').trim();
-      } else {
-        const obj = {};
-        overlay.querySelectorAll('[data-ck]').forEach(el => {
-          if (el.value.trim()) obj[el.dataset.ck] = el.value.trim();
-        });
-        cookie = joinCookieObj(obj);
-      }
+      const r = parseCookieInput(overlay.querySelector('[data-name=cookie]').value);
+      if (r.error) return { error: r.error };
+      const cookie = r.cookie;
       if (!cookie) return { error: t('Cookie 不能为空') };
-      if (!cookie.includes('SAPISID')) return { error: t('cookie 里没有 SAPISID，多半没复制全') };
+      if (!parseCookieStr(cookie).SAPISID) return { error: t('cookie 里没有 SAPISID，多半没复制全') };
       return { label, cookie, note, authuser };
     },
   });

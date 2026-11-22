@@ -2,6 +2,23 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.32.4
+
+### 新增 / Features
+
+- **导入 Cookie 支持浏览器扩展导出的 JSON 数组与自动化推送同步（#99，感谢 @georgelichen）**：
+  - 支持直接粘贴 Cookie-Editor、EditThisCookie 导出的 JSON 数组，或 Playwright / Puppeteer 的 `storageState`（`{"cookies": [...]}`）文件；
+  - 自动保留发往 `gemini.google.com` 的必要与附带 Cookie，同名项优先保留子域名更具体的值，过滤其他站点的无关条目；
+  - 面板新增实时格式解析与关键 Cookie（`SAPISID`、`__Secure-1PSID`、`__Secure-1PSIDTS`、`OSID`）状态预览，并提供“从文件读取”选择器；
+  - 新增 `POST /admin/api/cookies/sync` 接口：供浏览器扩展或外部脚本周期性推送最新 Cookie，同会话自动增量更新，被限流停用的账号收到有效 Cookie 自动重新激活。
+
+- **基于 qpEbW RPC 的上游真实额度动态校验，彻底解决模型降级 5 小时假锁定（#100，感谢 @Shakya47）**：
+  - 仅在触发模型降级（`modelDowngraded`）时按需请求 Google 内部 `qpEbW` (`CHECK_GEMINI_QUOTA`) RPC，零正常请求延迟；
+  - 区分集群瞬时容量削峰（`Remaining > 0`）与真实额度耗尽（`Remaining <= 0`）：瞬时负载削峰豁免 300 分钟长期惩罚，仅返回 15 秒短重试提示，其他请求立即可用；
+  - 真实耗尽时根据上游准确的 `ResetAt` 时间戳进行动态冷却，并在额度恢复时自动解除冷却；
+  - 具备 Singleflight 并发探针合并、Protobuf JSPB 零值边界容错与 2 分钟内连续 3 次削峰熔断保护；
+  - 新增 `GET /admin/api/quota` 接口，并在 `GET /admin/api/cookies` 中补充最新额度状态。
+
 ## 4.32.3
 
 ### 修复 / Fixes
