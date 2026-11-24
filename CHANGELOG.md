@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.32.5
+
+### 新增 / Features
+
+- **Responses 接口工具调用自动容错纠偏与原生会话保活（#103，感谢 @georgelichen）**：
+  - **畸形工具调用单轮纠错**：针对模型在 Responses 接口中出现的明显能力误报（例如在有工具时误称“未开启联网”、“工具次数剩余 0”）或协议格式瑕疵，提供至多一次受控单轮纠正机制；
+  - **原生会话状态保留**：在超长多轮对话或纠错时保留已完成的工具结果和策略，若超出内联 prompt 预算则将溢出上下文作为附件无缝接入原生会话，避免会话中断；
+  - **Cookie 轮转与 XSRF 自动重试**：在多轮会话续接时若检测到账号 Cookie 发生后台轮转或 XSRF Token 失效，自动使用新 Cookie 重新获取 Token 并无缝重试；
+  - **OpenAI Responses 规范对齐**：补充 `tool_protocol_error` 错误码规范与 Responses 风格 `tool_choice` 参数解析（支持顶层 `name`）；
+  - **Windows 客户端兼容优化**：修复 Windows 环境下通过 `curl.exe` 导入 Cookie 时由 `^"` 和换行转义导致的解析异常。
+
 ## 4.32.4
 
 ### 新增 / Features

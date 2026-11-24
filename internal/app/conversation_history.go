@@ -14,7 +14,8 @@ import (
 type conversationOptions struct {
 	ctx              context.Context
 	requestScope     string
-	normalizeToolIDs bool // Gemini permits clients to omit call/result IDs.
+	normalizeToolIDs bool            // Gemini permits clients to omit call/result IDs.
+	recoverToolReply context.Context // Responses may regenerate an uncommitted tool reply.
 }
 
 // conversationRequestScope separates local continuation state. prompt_cache_key
@@ -102,6 +103,9 @@ func normalizeConversationMessages(messages []map[string]interface{}) []map[stri
 			role = "user"
 		}
 		m := map[string]interface{}{"role": role, "content": contentToString(source["content"])}
+		if role == "tool" && hasToolResultError(source) {
+			m["is_error"] = true
+		}
 		for _, field := range []string{"name", "tool_call_id"} {
 			if v := getStr(source, field); v != "" {
 				m[field] = v

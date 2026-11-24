@@ -117,46 +117,17 @@ func buildPromptParts(messages []map[string]interface{}, tools []map[string]inte
 	var parts []string
 
 	toolsInjected := false
-	mode, forced := parseToolChoice(toolChoice)
+	mode, _ := parseToolChoice(toolChoice)
 	if len(tools) > 0 && mode != "none" {
-		var defs []map[string]interface{}
-		for _, tool := range tools {
-			fn := tool
-			if t, ok := tool["type"].(string); ok && t == "function" {
-				if f, ok := tool["function"].(map[string]interface{}); ok {
-					fn = f
-				}
-			}
-			name := getStr(fn, "name")
-			if forced != "" && name != forced {
-				continue // 指定了函数名，其余不进 prompt
-			}
-			defs = append(defs, map[string]interface{}{
-				"name":        name,
-				"description": getStr(fn, "description"),
-				"parameters":  fn["parameters"],
-			})
-		}
+		defs := promptToolDefinitions(tools, toolChoice)
 		if len(defs) > 0 {
 			defsJSON := compactJSON(defs)
-			rule := "Only use tool_call blocks when needed."
-			switch {
-			case forced != "":
-				rule = fmt.Sprintf(
-					"You MUST call the tool %q. Reply with the tool_call block and nothing "+
-						"else — do not answer the question yourself, even if you know the answer.",
-					forced)
-			case mode == "required":
-				rule = "You MUST call one of the tools above. Reply with the tool_call block " +
-					"and nothing else — do not answer the question yourself, even if you " +
-					"know the answer."
-			}
 			pp.head = fmt.Sprintf(
 				"[System instruction]: You have access to tools. "+
 					"To call a tool, respond with:\n"+
 					"```tool_call\n{\"name\": \"func_name\", \"arguments\": {...}}\n```\n"+
 					"%s\n\n"+
-					"Available tools:\n%s", rule, defsJSON,
+					"Available tools:\n%s", toolChoiceInstruction(toolChoice), defsJSON,
 			)
 			toolsInjected = true
 		}
@@ -214,7 +185,8 @@ func buildPromptParts(messages []map[string]interface{}, tools []map[string]inte
 	// 工具名（shell_command）0/4 抄假名 —— 示例教的是「动作」不是名字，故不必按客户端
 	// 动态生成 schema。
 	if toolsInjected {
-		pp.tail = "[System instruction — highest priority]: To run a command, read a file or use a tool you MUST " +
+		pp.tail = toolExecutionBridge + "\n" +
+			"[System instruction — highest priority]: To run a command, read a file or use a tool (including web search, browsing, external APIs) you MUST " +
 			"output a ```tool_call``` block — this is the ONLY execution channel. A " +
 			"```powershell/```bash/```cmd/```python code block is NOT executed, it is only shown " +
 			"to the user; never use one to run anything, and never claim you lack tools.\n" +
@@ -236,7 +208,8 @@ func buildPromptParts(messages []map[string]interface{}, tools []map[string]inte
 			"README.md\", you reply with exactly one block and nothing else:\n" +
 			"```tool_call\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"ls -la\"}}\n```\n" +
 			"(In your block use one of the real tool names listed above with its own arguments.) " +
-			"When the request needs a tool, emit the tool_call block now."
+			"When the request needs a tool, emit the tool_call block now.\n" +
+			toolChoiceInstruction(toolChoice)
 	}
 
 	pp.body = parts
@@ -319,19 +292,6 @@ func formatToolResult(name, raw string) string {
 	return fmt.Sprintf("[%s]: %s", label, raw)
 }
 
-// toolContinuationReminder 在服务端多轮续接轮次补充工具指令，确保模型在后续轮次中
-// 既不丢失 tool_call 格式，也不会误判为没有工具或额度耗尽。
-func toolContinuationReminder(tools []map[string]interface{}, choice interface{}) string {
-	mode, forced := parseToolChoice(choice)
-	if mode == "none" || len(tools) == 0 {
-		return ""
-	}
-	rule := "To run the next tool, emit ONE ```tool_call``` block. Do not repeat a finished step; proceed to the next step. Never claim tool quota is exhausted or ask the user to reply continue."
-	if forced != "" {
-		rule = fmt.Sprintf("You MUST call the tool %q. Emit the ```tool_call``` block now.", forced)
-	}
-	return "[System instruction — highest priority]: " + rule
-}
 
 const (
 	toolFenceOpen  = "```tool_call"
@@ -602,6 +562,75 @@ func toolCallComplete(tools []map[string]interface{}) func(string) bool {
 	}
 }
 
+// The model sees a Gemini Web conversation, while the caller owns execution.
+// Distinguish those environments so a missing native browser/tool channel is
+// not mistaken for a denial from the Agent host.
+const toolExecutionBridge = "[Tool execution bridge]: The listed tools are provided and executed by the external Agent client, " +
+	"not by the Gemini website. When a tool is needed, your next response is an ordinary text data message " +
+	"for an external runner. A tool_call block is response text, not a Gemini native tool invocation. " +
+	"Writing this request does not consume Gemini native tool calls. Native Gemini tool counters and " +
+	"availability do not describe the external client tools. Serialize the needed tool name and arguments " +
+	"in a tool_call block; the client handles execution, " +
+	"permission checks and returns the result in the next turn. Gemini's own browser, local filesystem and " +
+	"session permissions do not determine whether these external tools are available. For current information, " +
+	"use a relevant listed search, browsing or network tool instead of assuming live access is disabled. " +
+	"Do not infer missing external tools from Gemini website limitations. Respect explicit client permission requirements, " +
+	"external tool budgets and returned tool errors; never invent remaining tool counts, approval, execution or search results."
+
+func promptToolDefinitions(tools []map[string]interface{}, choice interface{}) []map[string]interface{} {
+	mode, forced := parseToolChoice(choice)
+	if mode == "none" {
+		return nil
+	}
+	var defs []map[string]interface{}
+	for _, tool := range tools {
+		fn := tool
+		if f, ok := tool["function"].(map[string]interface{}); ok && getStr(tool, "type") == "function" {
+			fn = f
+		}
+		name := getStr(fn, "name")
+		if name == "" || (forced != "" && name != forced) {
+			continue
+		}
+		defs = append(defs, map[string]interface{}{
+			"name": name, "description": getStr(fn, "description"), "parameters": fn["parameters"],
+		})
+	}
+	return defs
+}
+
+func toolChoiceInstruction(choice interface{}) string {
+	mode, forced := parseToolChoice(choice)
+	switch {
+	case forced != "":
+		return fmt.Sprintf("You MUST call the tool %q. Reply with the tool_call block and nothing "+
+			"else — do not answer the question yourself, even if you know the answer.", forced)
+	case mode == "required":
+		return "You MUST call one of the tools above. Reply with the tool_call block " +
+			"and nothing else — do not answer the question yourself, even if you know the answer."
+	default:
+		return "Only use tool_call blocks when needed. Once the request is complete, give the final answer."
+	}
+}
+
+// Continuations retain schemas in upstream history. Repeat only the execution
+// bridge, allowed names and current policy after new messages, not old context.
+func toolContinuationReminder(tools []map[string]interface{}, choice interface{}) string {
+	defs := promptToolDefinitions(tools, choice)
+	if len(defs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, getStr(def, "name"))
+	}
+	encoded, _ := json.Marshal(names)
+	return toolExecutionBridge + "\n[Tool protocol reminder]: Use the schemas already supplied in this conversation. " +
+		"Allowed tool names: " + string(encoded) + ". To request a tool, emit ONE ```tool_call``` block " +
+		"containing {\"name\":\"an allowed tool name\",\"arguments\":{...}} and wait for its result. " +
+		"Do not repeat a successful action or claim it ran before receiving its result. Never claim tool quota is exhausted or ask the user to reply continue. " + toolChoiceInstruction(choice)
+}
+
 // parseToolChoice 解析 OpenAI 的 tool_choice。
 // 返回 (mode, forcedName)：mode ∈ {"auto","none","required"}；
 // forcedName 非空表示客户端点名了某个函数。
@@ -613,9 +642,15 @@ func parseToolChoice(tc interface{}) (string, string) {
 			return v, ""
 		}
 	case map[string]interface{}:
-		// {"type":"function","function":{"name":"..."}}
+		// Chat Completions: {"type":"function","function":{"name":"..."}}
 		if f, ok := v["function"].(map[string]interface{}); ok {
 			if n := getStr(f, "name"); n != "" {
+				return "required", n
+			}
+		}
+		// Responses: {"type":"function","name":"..."}
+		if getStr(v, "type") == "function" {
+			if n := getStr(v, "name"); n != "" {
 				return "required", n
 			}
 		}

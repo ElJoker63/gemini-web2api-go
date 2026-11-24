@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const Version = "4.32.4"
+const Version = "4.32.5"
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	body, _ := json.Marshal(data)
@@ -364,6 +364,12 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			}})
 			return
 		}
+		if _, ok := err.(*ToolProtocolError); ok {
+			writeJSON(w, 502, map[string]interface{}{"error": map[string]string{
+				"message": err.Error(), "type": "upstream_protocol_error", "code": "tool_protocol_error",
+			}})
+			return
+		}
 		writeJSON(w, 502, map[string]interface{}{"error": map[string]string{"message": "upstream error: " + err.Error()}})
 		return
 	}
@@ -649,7 +655,16 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	var toolCalls []ToolCall
 	var res *StreamResult
 	if rtCfg().MultiTurn && len(images) == 0 && modelCfg.Tool == 0 {
-		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, nil, conversationOptions{ctx: r.Context(), requestScope: conversationRequestScope(r, getStr(req, "prompt_cache_key"), getStr(req, "user"))})
+		text, toolCalls, res, err = callGeminiConv(messages, modelCfg, tools, req["tool_choice"], onDelta, nil, conversationOptions{
+			ctx: r.Context(), requestScope: conversationRequestScope(r, getStr(req, "prompt_cache_key"), getStr(req, "user")), recoverToolReply: r.Context(),
+		})
+	} else if modelCfg.Tool == 0 && len(images) == 0 && toolReplyHasFunction(tools, req["tool_choice"]) {
+		// Single-turn generation owns its prompt budget and can upload context
+		// as an attachment. Do not impose the inline conversation limit here.
+		text, toolCalls, res, err = generateToolReply(r.Context(), prompt, messages, tools, req["tool_choice"], onDelta, toolReplyOptions{recoverMalformed: true},
+			func(p string, delta func(string), _ bool) (*StreamResult, error) {
+				return streamGenerateWithFiles(r.Context(), p, pc, modelCfg, nil, delta, nil, nil)
+			})
 	} else {
 		text, toolCalls, res, err = callGemini(r.Context(), prompt, pc, modelCfg, tools, images, onDelta, nil)
 	}
@@ -690,6 +705,9 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 			if _, ok := err.(*ToolCallParseError); ok {
 				errObj["code"] = "tool_call_parse_error"
 			}
+			if _, ok := err.(*ToolProtocolError); ok {
+				errObj["code"] = "tool_protocol_error"
+			}
 			writeEvent("response.failed", map[string]interface{}{
 				"type": "response.failed",
 				"response": map[string]interface{}{
@@ -719,6 +737,12 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 				"message": rle.Error(),
 				"type":    "rate_limit_exceeded",
 				"code":    "ip_slot_full",
+			}})
+			return
+		}
+		if _, ok := err.(*ToolProtocolError); ok {
+			writeJSON(w, 502, map[string]interface{}{"error": map[string]string{
+				"message": err.Error(), "type": "upstream_protocol_error", "code": "tool_protocol_error",
 			}})
 			return
 		}
