@@ -222,6 +222,16 @@ func getAnonSession(proxyURL string) (string, error) {
 	return strings.Join(pairs, "; "), nil
 }
 
+// convAccountUnusableError 是会话绑定的登录号取不到 XSRF：cookie 失效或被拦。
+// 新会话据此换下一个号；续接的会话绑死在这个号上，只能报错。
+type convAccountUnusableError struct {
+	AccountID int64
+	Err       error
+}
+
+func (e *convAccountUnusableError) Error() string { return "取 XSRF 失败: " + e.Err.Error() }
+func (e *convAccountUnusableError) Unwrap() error { return e.Err }
+
 // conversationXSRF 在续接的登录票据失效后，尝试使用同一身份已轮转的票据。
 func conversationXSRF(conv *convState, proxy Proxy, fetch func(string, int, string) (string, error)) (string, error) {
 	token, err := fetch(conv.cookie, conv.authuser, proxy.URL)
@@ -338,7 +348,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 			}
 			if xsrf == "" {
 				return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID},
-					fmt.Errorf("取 XSRF 失败: %w", err)
+					&convAccountUnusableError{AccountID: conv.accountID, Err: err}
 			}
 		}
 	}
@@ -589,7 +599,7 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 		if pickedOK {
 			recordProxyResult(p.ID, true, "")
 		}
-		return &StreamResult{
+		result := &StreamResult{
 			Emitted:          tracker.emitted,
 			EmittedReasoning: rtracker.emitted,
 			Raw:              string(raw),
@@ -603,7 +613,9 @@ func streamGenerateConv(prompt string, mc ModelConfig, conv *convState,
 			ConvRCID:         conv.rcid,
 			TTFBMs:           ttfb,
 			TotalMs:          time.Since(t0).Milliseconds(),
-		}, nil
+		}
+		fetchUnrequestedMedia(mc, result, conv.cookie, conv.sapisid, xsrf, proxyURL, conv.authuser)
+		return result, nil
 	}
 	return &StreamResult{ProxyID: p.ID, ProxyName: p.Name, AccountID: conv.accountID}, lastErr
 }
@@ -667,6 +679,11 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 				if !anonFirstEligible(mc, needsContextFile) {
 					a, _, perr := pickAccountForModel(mc, exclude)
 					if perr != nil {
+						// 换号时已经没号可挑：上一个号是取不到 XSRF，就报它，别说成降级
+						var unusable *convAccountUnusableError
+						if try > 0 && errors.As(err, &unusable) {
+							break
+						}
 						var last *ModelDowngradedError
 						if try > 0 && errors.As(err, &last) {
 							// 换号时已经没号可挑：报上一个号真实的降级，补上解冻时间
@@ -688,6 +705,12 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 				conv.ctx = opt.ctx
 			}
 			res, err = runConversationTurn(p, mc, conv, delta, reasoning)
+			// 新会话的号取不到 XSRF（已记过失败）：排除它，换下一个号。
+			var unusable *convAccountUnusableError
+			if fresh && !retry && errors.As(err, &unusable) && unusable.AccountID > 0 {
+				exclude[unusable.AccountID] = true
+				continue
+			}
 			if retry || !retryOnAnotherAccount(res, err, mc, exclude) || !fresh {
 				break
 			}
@@ -715,12 +738,19 @@ func callGeminiConv(messages []map[string]interface{}, mc ModelConfig,
 			func(p string, delta func(string), retry bool) (*StreamResult, error) {
 				return generate(p, delta, nil, retry)
 			})
+		if err == nil && res != nil && len(res.Artifacts) > 0 {
+			text = appendArtifactMarkdown(text, res.Artifacts)
+		}
 	} else {
 		res, err = generate(prompt, onDelta, onReasoning, false)
 		if err == nil {
 			text = extractResponseText(res.Raw)
 			if len(tools) > 0 {
 				text, toolCalls, err = parseToolCalls(text)
+			}
+			// 文本模型被上游切去生图 / 音乐（#105）：产物附在正文后面，续接历史也按这份正文记。
+			if err == nil && len(res.Artifacts) > 0 {
+				text = appendArtifactMarkdown(text, res.Artifacts)
 			}
 			if err == nil && text == "" && len(toolCalls) == 0 {
 				err = fmt.Errorf("upstream returned no content frame (raw %d bytes)", len(res.Raw))

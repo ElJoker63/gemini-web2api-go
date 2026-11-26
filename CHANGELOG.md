@@ -2,6 +2,24 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 4.33.0
+
+### 新增 / Features
+
+- **浏览器扩展自动同步 cookie（`extension/`，Firefox / Chrome / Edge）**：每隔几分钟把浏览器里当前的 `gemini.google.com` cookie 推到服务端（`POST /admin/api/cookies/sync`），`__Secure-1PSIDTS` 等关键项一变化 30 秒内再推一次；同一浏览器登了多个号时按账号序号分别同步。安装和设置见 [`extension/README.md`](extension/README.md)。
+
+### 修复 / Fixes
+
+- **多轮续接取 XSRF 失败时不换号（#106）**：失效账号每次都被选中、请求间歇性 502，失败也不记到账号上。现在返回 `convAccountUnusableError`，记一次鉴权失败（连续 3 次自动停用）并在新会话时排除该账号换下一个号。
+- **保活返回 401/403 时不计入账号健康（#106）**：现在保活被拒时调用 `checkAccountCookie` 检测一次登录态，确实失效的计入失败，面板上不再一直显示正常。
+- **文本模型被上游切去生图 / 音乐时判成降级（#105）**：`strict_model` 把 Nano Banana / Lyria 出图出乐当成降级重试，产生重复生成并最终返回 429。现在回报媒体后端时不算降级，产物照常补取并附在回复正文后面返回（单轮与多轮路径均支持）。
+- **端口被占时仍打印 Listening（#101）**：启动时先 `net.Listen` 绑定端口再打印横幅，绑定失败直接报错退出；`Listening` 显示实际绑定的端口，可作为就绪信号。
+- **系统日志级别误判与 `tail` 封顶**：日志级别不再把字节数（如 `1500 字节`）、账号编号（如 `#401`）当成 HTTP 状态码，并将 `403` 与所有 `5xx` 归为 `ERROR`；`tail` 超过缓冲区容量时封顶到容量而非退回 100。
+
+### 文档 / Docs
+
+- 补充浏览器扩展同步、Cookie 导入格式（含 Windows cmd 版 cURL 与 JSON）及代理软件 TUN 模式下设置 `GODEBUG=netdns=cgo` 的故障排查说明（#96）。
+
 ## 4.32.5
 
 ### 新增 / Features

@@ -185,13 +185,15 @@ for chunk in response:
 ## Pool de Cookies y Requisito Obligatorio de OSID
 
 1. Inicia sesión con tu cuenta de Google en [gemini.google.com](https://gemini.google.com).
-2. Abre las herramientas de desarrollo (**F12**) → pestaña **Red (Network)** → haz una pregunta o recarga → selecciona una petición hacia `gemini.google.com` → clic derecho **«Copiar como cURL»** y copia toda la línea del encabezado `Cookie:`.
+2. Abre las herramientas de desarrollo (**F12**) → pestaña **Red (Network)** → haz una pregunta o recarga → selecciona una petición hacia `gemini.google.com` → clic derecho **«Copiar como cURL»** y copia toda la línea del encabezado `Cookie:` (o exporta el JSON desde Cookie-Editor / EditThisCookie).
 3. La cadena de cookies debe contener al menos: `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-1PSID`, `__Secure-1PSIDTS`, `__Secure-3PSID`, `__Secure-1PSIDCC` y **`OSID`**.
-4. Pega la cadena en el panel web: **Cookie Pool → Agregar Cuenta** (o impórtalas con `--cookie-file cookies.txt`).
+4. Pega la cadena en el panel web: **Cookie Pool → + Importar Cookie**. Acepta cadenas `k=v; …`, comandos «Copiar como cURL» completos (incluido el formato cmd de Windows), arreglos JSON exportados por Cookie-Editor / EditThisCookie y `storageState` de Playwright (el JSON se filtra automáticamente por dominio hacia `gemini.google.com`). También puedes usar `--cookie-file cookies.txt`.
 
 > ⚠️ **Requisito obligatorio de `OSID`**: Desde noviembre de 2026, Google exige obligatoriamente la cookie `OSID` propia del host `gemini.google.com`. Sin ella, Google redirige las peticiones a `accounts.google.com` (HTTP 302). Nuestro panel detecta esto preventivamente y marcará la cuenta con la etiqueta **«Falta OSID»**.
 >
 > 💡 **Recomendación de navegador:** Se recomienda exportar las cookies desde **Firefox**. Las versiones recientes de Google Chrome activan *Device Bound Session Credentials* (DBSC), enlazando la sesión al chip criptográfico del equipo local; al exportarlas a un servidor externo, Chrome invalida la rotación (`*PSIDTS`) en pocas horas. Firefox no impone esta restricción.
+
+**Sincronización automática con extensión de navegador:** El directorio [`extension/`](extension/README.md) del repositorio incluye una extensión (Firefox / Chrome / Edge) que envía periódicamente las cookies actuales de `gemini.google.com` a `POST /admin/api/cookies/sync`, y vuelve a sincronizar en 30 segundos si cambia alguna cookie clave (`__Secure-1PSIDTS`, `OSID`, etc.). El servidor busca la cuenta por `SAPISID + __Secure-1PSID` más el índice de cuenta y la actualiza o crea una nueva, reactivando automáticamente cuentas deshabilitadas al recibir cookies frescas. Si usas un cliente proxy en modo TUN y el servicio agota el tiempo de espera mientras el navegador sí conecta, ejecuta el binario con `GODEBUG=netdns=cgo` para usar el resolvedor DNS del sistema (#96).
 
 ---
 
